@@ -1,10 +1,10 @@
 ---
 date: 2026-10-23
-status: proposed
+status: accepted
 ---
 # Librairies de rendu de partition et de génération PDF
 
-**Context:** Comparaison demandée par l'item 001, avant les items d'éditeur et d'export. Versions relevées sur npm le 2026-10-23. Statut `proposed` : la décision revient au Product Owner.
+**Context:** Comparaison demandée par l'item 001, avant les items d'éditeur et d'export. Versions relevées sur npm le 2026-10-23. Validée par le Product Owner le 2026-10-24 pour VexFlow.
 
 **Rendu de partition — options comparées :**
 
