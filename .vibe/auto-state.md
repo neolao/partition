@@ -1,10 +1,15 @@
 ---
-status: idle
-started: 2026-10-23T00:00
+status: running
+started: 2026-10-23T23:30
 limit: none
 push: false
+current: 002
+attempt: 1
 ---
 # Auto run journal
 
 ## 2026-10-23T00:00 — run started (limit: none)
 - 001 — feature — blocked: spike de recherche, décision du PO requise (68ffd99)
+
+## 2026-10-23T23:30 — run started (limit: none)
+- 002 — feature — in progress
