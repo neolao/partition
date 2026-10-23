@@ -3,7 +3,7 @@ status: running
 started: 2026-10-23T23:30
 limit: none
 push: false
-current: 002
+current: 003
 attempt: 1
 ---
 # Auto run journal
@@ -12,4 +12,5 @@ attempt: 1
 - 001 — feature — blocked: spike de recherche, décision du PO requise (68ffd99)
 
 ## 2026-10-23T23:30 — run started (limit: none)
-- 002 — feature — in progress
+- 002 — feature — done (d12d644)
+- 003 — feature — in progress
