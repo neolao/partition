@@ -1,5 +1,5 @@
 ---
-status: todo
+status: blocked
 ---
 
 # Comparer les librairies de rendu et de PDF
@@ -18,3 +18,7 @@ Comparer les librairies de rendu de partition et de génération PDF utilisables
 ## Notes
 
 Item de recherche : aucun code de production attendu. Décision laissée au Product Owner.
+
+## Blocked
+
+2026-10-23 : item de recherche (spike) dont la décision est laissée au Product Owner ; non réalisable en mode autonome.
