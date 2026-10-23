@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createEditor } from "../src/editor";
+import { toMusicXml } from "../src/musicxml";
+
+vi.mock("../src/musicxml", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../src/musicxml")>();
+	return { toMusicXml: vi.fn(actual.toMusicXml) };
+});
 
 // Portée rendue : lignes à y = 60, 70, 80, 90, 100 (mi4 en bas, fa5 en haut).
 const Y_SOL4 = 90;
@@ -18,6 +24,11 @@ beforeEach(() => {
 	staff = root.querySelector<HTMLElement>(".staff") as HTMLElement;
 	// jsdom n'a pas de mise en page : la portée est placée à l'origine de la page.
 	staff.getBoundingClientRect = () => new DOMRect(0, 0, 600, 140);
+});
+
+afterEach(() => {
+	vi.restoreAllMocks();
+	vi.useRealTimers();
 });
 
 function clickAt(x: number, y: number): void {
@@ -290,5 +301,109 @@ describe("createEditor : suppression", () => {
 		const event = press("Delete");
 		expect(event.defaultPrevented).toBe(false);
 		expect(announcement()).toBe("");
+	});
+});
+
+describe("createEditor : export MusicXML", () => {
+	function stubDownload() {
+		const blobs: Blob[] = [];
+		const revoked: string[] = [];
+		const downloads: { name: string; href: string }[] = [];
+		vi.spyOn(URL, "createObjectURL").mockImplementation((blob) => {
+			blobs.push(blob as Blob);
+			return "blob:test";
+		});
+		vi.spyOn(URL, "revokeObjectURL").mockImplementation((url) => {
+			revoked.push(url);
+		});
+		vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
+			this: HTMLAnchorElement,
+		) {
+			downloads.push({ name: this.download, href: this.href });
+		});
+		return { blobs, revoked, downloads };
+	}
+
+	it("place le bouton hors des groupes à état pressé", () => {
+		const button = root.querySelector<HTMLButtonElement>(
+			'[data-action="export-musicxml"]',
+		);
+		expect(button?.textContent).toBe("Exporter MusicXML");
+		expect(button?.hasAttribute("aria-pressed")).toBe(false);
+	});
+
+	it("télécharge partition.musicxml avec le contenu de la partition", async () => {
+		vi.useFakeTimers();
+		const { blobs, revoked, downloads } = stubDownload();
+		clickAt(300, Y_SOL4);
+		choose('[data-action="export-musicxml"]');
+		expect(downloads).toEqual([
+			{ name: "partition.musicxml", href: "blob:test" },
+		]);
+		expect(blobs[0].type).toBe("application/vnd.recordare.musicxml+xml");
+		const text = await blobs[0].text();
+		expect(text).toContain("<step>G</step>");
+		expect(text).toContain("<type>quarter</type>");
+		expect(revoked).toEqual([]);
+		vi.runAllTimers();
+		expect(revoked).toEqual(["blob:test"]);
+		expect(announcement()).toBe("Partition exportée");
+		expect(document.querySelector("a[download]")).toBeNull();
+	});
+
+	it("exporte une partition vide : mesure vide, un téléchargement, annonce", async () => {
+		const { blobs, downloads } = stubDownload();
+		choose('[data-action="export-musicxml"]');
+		expect(downloads).toHaveLength(1);
+		expect(blobs).toHaveLength(1);
+		const text = await blobs[0].text();
+		expect(text).toContain("<score-partwise");
+		expect(text).toContain('<measure number="1">');
+		expect(text).not.toContain("<note>");
+		expect(announcement()).toBe("Partition exportée");
+	});
+
+	it("exporte une note et un silence lisibles par un parseur XML", async () => {
+		const { blobs } = stubDownload();
+		clickAt(100, Y_SOL4);
+		choose('[data-mode="rest"]');
+		choose('[data-duration="h"]');
+		clickAt(300, Y_SOL4);
+		choose('[data-action="export-musicxml"]');
+		const doc = new DOMParser().parseFromString(
+			await blobs[0].text(),
+			"application/xml",
+		);
+		expect(doc.querySelector("parsererror")).toBeNull();
+		const notes = [...doc.querySelectorAll("measure > note")];
+		expect(notes).toHaveLength(2);
+		expect(notes[0].querySelector("pitch > step")?.textContent).toBe("G");
+		expect(notes[0].querySelector("pitch > octave")?.textContent).toBe("4");
+		expect(notes[0].querySelector("duration")?.textContent).toBe("4");
+		expect(notes[1].querySelector("rest")).not.toBeNull();
+		expect(notes[1].querySelector("duration")?.textContent).toBe("8");
+	});
+
+	it("annonce l'échec sans exception quand la conversion lève", () => {
+		const { downloads } = stubDownload();
+		vi.mocked(toMusicXml).mockImplementationOnce(() => {
+			throw new RangeError("Durée invalide : 32");
+		});
+		expect(() => choose('[data-action="export-musicxml"]')).not.toThrow();
+		expect(announcement()).toBe("Échec de l'export : Durée invalide : 32");
+		expect(downloads).toEqual([]);
+	});
+
+	it("nettoie le lien et l'URL quand le téléchargement lève", () => {
+		vi.useFakeTimers();
+		const { revoked } = stubDownload();
+		vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {
+			throw new Error("téléchargement bloqué");
+		});
+		expect(() => choose('[data-action="export-musicxml"]')).not.toThrow();
+		vi.runAllTimers();
+		expect(announcement()).toBe("Échec de l'export : téléchargement bloqué");
+		expect(document.querySelector("a[download]")).toBeNull();
+		expect(revoked).toEqual(["blob:test"]);
 	});
 });

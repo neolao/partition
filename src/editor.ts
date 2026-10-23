@@ -1,3 +1,4 @@
+import { toMusicXml } from "./musicxml";
 import {
 	DURATION_NAMES,
 	DURATIONS,
@@ -50,7 +51,10 @@ export function createEditor(root: HTMLElement): { redraw: () => void } {
 		createButton("Note", { mode: "note" }),
 		createButton("Silence", { mode: "rest" }),
 	];
-	toolbar.append(...modeButtons, ...durationButtons);
+	const exportButton = createButton("Exporter MusicXML", {
+		action: "export-musicxml",
+	});
+	toolbar.append(...modeButtons, ...durationButtons, exportButton);
 
 	const staff = document.createElement("div");
 	staff.className = "staff";
@@ -148,9 +152,39 @@ export function createEditor(root: HTMLElement): { redraw: () => void } {
 		return true;
 	}
 
+	function exportMusicXml() {
+		let url: string | null = null;
+		let link: HTMLAnchorElement | null = null;
+		try {
+			const blob = new Blob([toMusicXml(score)], {
+				type: "application/vnd.recordare.musicxml+xml",
+			});
+			url = URL.createObjectURL(blob);
+			link = document.createElement("a");
+			link.href = url;
+			link.download = "partition.musicxml";
+			document.body.append(link);
+			link.click();
+			live.textContent = "Partition exportée";
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			live.textContent = `Échec de l'export : ${message}`;
+		} finally {
+			link?.remove();
+			if (url !== null) {
+				const exportedUrl = url;
+				setTimeout(() => URL.revokeObjectURL(exportedUrl), 0);
+			}
+		}
+	}
+
 	toolbar.addEventListener("click", (event) => {
 		const button = (event.target as Element).closest("button");
 		if (!button) {
+			return;
+		}
+		if (button.dataset.action === "export-musicxml") {
+			exportMusicXml();
 			return;
 		}
 		if (button.dataset.duration) {

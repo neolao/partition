@@ -6,6 +6,7 @@
 
 - [`modules/app.md`](modules/app.md) — point d'entrée du site statique.
 - [`modules/editor.md`](modules/editor.md) — éditeur interactif (palette, clics, clavier).
+- [`modules/musicxml.md`](modules/musicxml.md) — export MusicXML de la partition.
 - [`modules/score.md`](modules/score.md) — modèle de partition pur.
 - [`modules/staff.md`](modules/staff.md) — rendu SVG de la portée avec VexFlow.
 

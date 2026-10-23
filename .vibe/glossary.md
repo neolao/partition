@@ -21,3 +21,7 @@ _Sources: `src/score.ts`_
 ## Sélection
 Élément actuellement choisi, que les flèches déplacent et que Suppr supprime.
 _Sources: `src/editor.ts`_
+
+## Export MusicXML
+Téléchargement de la partition sous forme de fichier MusicXML (`partition.musicxml`), format standard lisible par d'autres logiciels de notation.
+_Sources: `src/musicxml.ts`, `src/editor.ts`_
