@@ -1,4 +1,4 @@
-import { toMusicXml } from "./musicxml";
+import { fromMusicXml, toMusicXml } from "./musicxml";
 import {
 	DURATION_NAMES,
 	DURATIONS,
@@ -54,7 +54,20 @@ export function createEditor(root: HTMLElement): { redraw: () => void } {
 	const exportButton = createButton("Exporter MusicXML", {
 		action: "export-musicxml",
 	});
-	toolbar.append(...modeButtons, ...durationButtons, exportButton);
+	const importButton = createButton("Importer MusicXML", {
+		action: "import-musicxml",
+	});
+	const fileInput = document.createElement("input");
+	fileInput.type = "file";
+	fileInput.accept = ".musicxml,.xml,application/vnd.recordare.musicxml+xml";
+	fileInput.hidden = true;
+	toolbar.append(
+		...modeButtons,
+		...durationButtons,
+		exportButton,
+		importButton,
+		fileInput,
+	);
 
 	const staff = document.createElement("div");
 	staff.className = "staff";
@@ -71,7 +84,23 @@ export function createEditor(root: HTMLElement): { redraw: () => void } {
 	live.setAttribute("aria-live", "polite");
 	live.className = "visually-hidden";
 
-	root.replaceChildren(toolbar, staff, hint, live);
+	const notice = document.createElement("div");
+	notice.className = "notice";
+	notice.hidden = true;
+
+	root.replaceChildren(toolbar, notice, staff, hint, live);
+
+	function showNotice(role: "status" | "alert", lines: string[]) {
+		notice.setAttribute("role", role);
+		notice.replaceChildren(
+			...lines.map((line) => {
+				const paragraph = document.createElement("p");
+				paragraph.textContent = line;
+				return paragraph;
+			}),
+		);
+		notice.hidden = lines.length === 0;
+	}
 
 	function refreshToolbar() {
 		for (const button of durationButtons) {
@@ -178,6 +207,31 @@ export function createEditor(root: HTMLElement): { redraw: () => void } {
 		}
 	}
 
+	async function importMusicXml(file: File) {
+		try {
+			const { score: imported, warnings } = fromMusicXml(await file.text());
+			update(imported, null, "Partition importée");
+			showNotice(
+				"status",
+				warnings.length > 0
+					? ["Partition importée. Éléments non pris en charge :", ...warnings]
+					: [],
+			);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			showNotice("alert", [`Échec de l'import : ${message}`]);
+			live.textContent = `Échec de l'import : ${message}`;
+		}
+	}
+
+	fileInput.addEventListener("change", () => {
+		const file = fileInput.files?.[0];
+		if (file) {
+			void importMusicXml(file);
+		}
+		fileInput.value = "";
+	});
+
 	toolbar.addEventListener("click", (event) => {
 		const button = (event.target as Element).closest("button");
 		if (!button) {
@@ -185,6 +239,10 @@ export function createEditor(root: HTMLElement): { redraw: () => void } {
 		}
 		if (button.dataset.action === "export-musicxml") {
 			exportMusicXml();
+			return;
+		}
+		if (button.dataset.action === "import-musicxml") {
+			fileInput.click();
 			return;
 		}
 		if (button.dataset.duration) {

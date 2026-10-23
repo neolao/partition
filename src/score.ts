@@ -11,7 +11,7 @@ export const DURATION_NAMES: Record<Duration, string> = {
 	"16": "double croche",
 };
 
-const STEPS = ["c", "d", "e", "f", "g", "a", "b"] as const;
+export const STEPS = ["c", "d", "e", "f", "g", "a", "b"] as const;
 export type Step = (typeof STEPS)[number];
 
 const STEP_NAMES: Record<Step, string> = {

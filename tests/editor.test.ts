@@ -5,7 +5,7 @@ import { toMusicXml } from "../src/musicxml";
 
 vi.mock("../src/musicxml", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../src/musicxml")>();
-	return { toMusicXml: vi.fn(actual.toMusicXml) };
+	return { ...actual, toMusicXml: vi.fn(actual.toMusicXml) };
 });
 
 // Portée rendue : lignes à y = 60, 70, 80, 90, 100 (mi4 en bas, fa5 en haut).
@@ -405,5 +405,74 @@ describe("createEditor : export MusicXML", () => {
 		expect(announcement()).toBe("Échec de l'export : téléchargement bloqué");
 		expect(document.querySelector("a[download]")).toBeNull();
 		expect(revoked).toEqual(["blob:test"]);
+	});
+});
+
+describe("createEditor : import MusicXML", () => {
+	const VALID = `<score-partwise version="4.0"><part-list/><part id="P1"><measure number="1"><attributes><divisions>4</divisions></attributes>
+		<note><pitch><step>G</step><octave>4</octave></pitch><duration>4</duration><type>quarter</type></note>
+		<note><rest/><duration>8</duration><type>half</type></note></measure></part></score-partwise>`;
+	const input = () =>
+		root.querySelector<HTMLInputElement>(
+			'input[type="file"]',
+		) as HTMLInputElement;
+	const notice = () =>
+		root.querySelector<HTMLElement>(".notice") as HTMLElement;
+
+	async function importText(text: string) {
+		const live = root.querySelector("[aria-live]") as HTMLElement;
+		live.textContent = "";
+		const file = new File([text], "p.musicxml");
+		Object.defineProperty(input(), "files", {
+			value: [file],
+			configurable: true,
+		});
+		input().dispatchEvent(new Event("change"));
+		await vi.waitFor(() => expect(announcement()).not.toBe(""));
+	}
+
+	it("ouvre le sélecteur de fichier depuis le bouton Importer MusicXML", () => {
+		const spy = vi.spyOn(input(), "click");
+		const button = root.querySelector<HTMLButtonElement>(
+			'[data-action="import-musicxml"]',
+		);
+		expect(button?.textContent).toBe("Importer MusicXML");
+		button?.click();
+		expect(spy).toHaveBeenCalledOnce();
+	});
+
+	it("affiche la partition importée sans avertissement", async () => {
+		await importText(VALID);
+		expect(announcement()).toBe("Partition importée");
+		expect(noteGroups()).toHaveLength(2);
+		expect(notice().hidden).toBe(true);
+	});
+
+	it("remplace la partition existante et efface la sélection", async () => {
+		clickAt(100, Y_SOL4);
+		expect(selectedGroups()).toHaveLength(1);
+		await importText(VALID);
+		expect(noteGroups()).toHaveLength(2);
+		expect(selectedGroups()).toHaveLength(0);
+	});
+
+	it("liste les éléments non pris en charge", async () => {
+		await importText(VALID.replace("</measure>", "<direction/></measure>"));
+		expect(notice().hidden).toBe(false);
+		expect(notice().getAttribute("role")).toBe("status");
+		expect(notice().textContent).toContain("Élément « direction » ignoré");
+	});
+
+	it("affiche une erreur claire et garde la partition quand le fichier est invalide", async () => {
+		clickAt(100, Y_SOL4);
+		await importText("pas du xml");
+		expect(notice().getAttribute("role")).toBe("alert");
+		expect(notice().textContent).toContain("Échec de l'import");
+		expect(noteGroups()).toHaveLength(1);
+	});
+
+	it("permet de réimporter le même fichier", async () => {
+		await importText(VALID);
+		expect(input().value).toBe("");
 	});
 });

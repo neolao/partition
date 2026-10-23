@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { toMusicXml } from "../src/musicxml";
+import { fromMusicXml, toMusicXml } from "../src/musicxml";
 import type { Score } from "../src/score";
 
 function parse(xml: string): Document {
@@ -124,5 +124,97 @@ describe("toMusicXml", () => {
 		] as unknown as Score;
 		expect(() => toMusicXml(badStep)).toThrow(RangeError);
 		expect(() => toMusicXml(badOctave)).toThrow(RangeError);
+	});
+});
+
+const wrap = (measures: string, extra = "") =>
+	`<?xml version="1.0"?><score-partwise version="4.0"><part-list><score-part id="P1"><part-name>P</part-name></score-part></part-list><part id="P1">${measures}</part>${extra}</score-partwise>`;
+const noteXml = (step: string, octave: number, type: string, more = "") =>
+	`<note><pitch><step>${step}</step><octave>${octave}</octave></pitch><duration>4</duration><type>${type}</type>${more}</note>`;
+
+describe("fromMusicXml", () => {
+	it("réimporte à l'identique un export (notes, silences, durées)", () => {
+		const score: Score = [
+			{ kind: "note", pitch: { step: "c", octave: 4 }, duration: "q" },
+			{ kind: "rest", duration: "h" },
+			{ kind: "note", pitch: { step: "g", octave: 5 }, duration: "8" },
+			{ kind: "rest", duration: "16" },
+			{ kind: "note", pitch: { step: "a", octave: 3 }, duration: "w" },
+		];
+		const result = fromMusicXml(toMusicXml(score));
+		expect(result.score).toEqual(score);
+		expect(result.warnings).toEqual([]);
+	});
+
+	it("réimporte une partition vide", () => {
+		expect(fromMusicXml(toMusicXml([]))).toEqual({ score: [], warnings: [] });
+	});
+
+	it("concatène les mesures de la première partie", () => {
+		const xml = wrap(
+			`<measure number="1">${noteXml("C", 4, "quarter")}</measure><measure number="2">${noteXml("D", 4, "half")}</measure>`,
+		);
+		expect(fromMusicXml(xml).score.map((e) => e.duration)).toEqual(["q", "h"]);
+	});
+
+	it("déduit la durée de <duration> quand <type> manque", () => {
+		const xml = wrap(
+			'<measure number="1"><attributes><divisions>1</divisions></attributes><note><rest/><duration>4</duration></note></measure>',
+		);
+		expect(fromMusicXml(xml).score).toEqual([{ kind: "rest", duration: "w" }]);
+	});
+
+	it("signale et ignore accords, altérations, points, armure et chiffrage", () => {
+		const xml = wrap(
+			`<measure number="1"><attributes><divisions>4</divisions><key><fifths>2</fifths></key><time><beats>3</beats><beat-type>4</beat-type></time></attributes>
+			<note><pitch><step>C</step><alter>1</alter><octave>4</octave></pitch><duration>6</duration><type>quarter</type><dot/></note>
+			${noteXml("E", 4, "quarter")}
+			<note><chord/><pitch><step>G</step><octave>4</octave></pitch><duration>4</duration><type>quarter</type></note>
+			<direction/></measure>`,
+		);
+		const result = fromMusicXml(xml);
+		expect(result.score).toEqual([
+			{ kind: "note", pitch: { step: "c", octave: 4 }, duration: "q" },
+			{ kind: "note", pitch: { step: "e", octave: 4 }, duration: "q" },
+		]);
+		expect(result.warnings).toEqual(
+			expect.arrayContaining([
+				"Armure ignorée",
+				"Chiffrage de mesure ignoré",
+				"Altérations (dièses, bémols) ignorées",
+				"Élément « dot » ignoré",
+				"Élément « chord » ignoré",
+				"Élément « direction » ignoré",
+			]),
+		);
+		expect(new Set(result.warnings).size).toBe(result.warnings.length);
+	});
+
+	it("signale les parties supplémentaires, les notes hors étendue et les durées inconnues", () => {
+		const xml = wrap(
+			`<measure number="1">${noteXml("C", 2, "quarter")}${noteXml("C", 4, "32nd")}${noteXml("D", 4, "quarter")}</measure>`,
+			"",
+		).replace("</part>", '</part><part id="P2"><measure number="1"/></part>');
+		const result = fromMusicXml(xml);
+		expect(result.score).toEqual([
+			{ kind: "note", pitch: { step: "d", octave: 4 }, duration: "q" },
+		]);
+		expect(result.warnings).toEqual(
+			expect.arrayContaining([
+				"Seule la première partie est importée",
+				"Notes hors de l'étendue de la portée ignorées",
+				"Notes de durée non prise en charge ignorées",
+			]),
+		);
+	});
+
+	it.each([
+		["du texte quelconque", "pas du xml", /XML valide/],
+		["un XML mal formé", "<score-partwise><part>", /XML valide/],
+		["un format timewise", "<score-timewise/>", /partwise/],
+		["une partition sans partie", "<score-partwise/>", /aucune partie/],
+		["une chaîne vide", "", /XML valide/],
+	])("rejette %s avec un message clair", (_label, xml, message) => {
+		expect(() => fromMusicXml(xml)).toThrow(message);
 	});
 });
