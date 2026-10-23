@@ -1,5 +1,5 @@
 ---
-status: blocked
+status: done
 ---
 
 # Comparer les librairies de rendu et de PDF
@@ -10,10 +10,10 @@ Comparer les librairies de rendu de partition et de génération PDF utilisables
 
 ## Acceptance Criteria
 
-- [ ] Au moins trois options de rendu de partition sont comparées sur des critères explicites (licence, taille, qualité du rendu, support MusicXML).
-- [ ] Au moins deux approches de génération PDF côté navigateur sont comparées (vectoriel ou image, qualité à l'impression).
-- [ ] Un prototype minimal vérifie que la librairie recommandée s'exécute dans le build Vite statique.
-- [ ] Une recommandation écrite est enregistrée dans `.vibe/decisions/`.
+- [x] Au moins trois options de rendu de partition sont comparées sur des critères explicites (licence, taille, qualité du rendu, support MusicXML).
+- [x] Au moins deux approches de génération PDF côté navigateur sont comparées (vectoriel ou image, qualité à l'impression).
+- [x] Un prototype minimal vérifie que la librairie recommandée s'exécute dans le build Vite statique.
+- [x] Une recommandation écrite est enregistrée dans `.vibe/decisions/`.
 
 ## Notes
 
