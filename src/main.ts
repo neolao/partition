@@ -1,6 +1,8 @@
-import { APP_TITLE } from "./title";
+import { renderEmptyStaff } from "./staff";
 
 const app = document.querySelector<HTMLDivElement>("#app");
 if (app) {
-	app.textContent = APP_TITLE;
+	const draw = () => renderEmptyStaff(app, app.clientWidth);
+	draw();
+	new ResizeObserver(draw).observe(app);
 }

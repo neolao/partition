@@ -13,8 +13,12 @@
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.6.2",
+		"jsdom": "^29.1.1",
 		"typescript": "^7.0.2",
 		"vite": "^8.3.5",
 		"vitest": "^5.0.5"
+	},
+	"dependencies": {
+		"vexflow": "^5.0.0"
 	}
 }
