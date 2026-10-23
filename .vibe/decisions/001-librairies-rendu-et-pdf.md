@@ -4,7 +4,7 @@ status: accepted
 ---
 # Librairies de rendu de partition et de génération PDF
 
-**Context:** Comparaison demandée par l'item 001, avant les items d'éditeur et d'export. Versions relevées sur npm le 2026-10-23. Validée par le Product Owner le 2026-10-24 pour VexFlow.
+**Context:** Comparaison demandée par l'item 001, avant les items d'éditeur et d'export. Versions relevées sur npm le 2026-10-23. Validée par le Product Owner le 2026-10-24 : VexFlow, puis la recommandation complète (svg2pdf.js + jsPDF, MusicXML écrit dans le projet).
 
 **Rendu de partition — options comparées :**
 
