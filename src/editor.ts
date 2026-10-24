@@ -391,7 +391,8 @@ export function createEditor(root: HTMLElement): { redraw: () => void } {
 		try {
 			downloadBlob(await buildPdf(score, settings), "partition.pdf");
 			announce("partition.pdf téléchargé");
-		} catch {
+		} catch (error) {
+			console.error("Export PDF échoué", error);
 			announce(
 				"Échec de l'export PDF. Réessayez ; si le problème persiste, utilisez Exporter MusicXML.",
 			);

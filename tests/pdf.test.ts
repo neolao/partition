@@ -1,13 +1,26 @@
 // @vitest-environment jsdom
-import { beforeAll, describe, expect, it } from "vitest";
+import { svg2pdf } from "svg2pdf.js";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import fontDataUri from "../src/fonts/bravura-subset.ttf?inline";
 import { buildPdf, paginateLines, splitIntoLines } from "../src/pdf";
 import {
+	CLEFS,
 	DEFAULT_SETTINGS,
+	DURATIONS,
 	type Duration,
 	type Score,
 	type ScoreElement,
+	type Settings,
 	splitMeasures,
+	TIME_SIGNATURES,
 } from "../src/score";
+import { renderStaff } from "../src/staff";
+import { readCmapCodePoints } from "./helpers/cmap";
+
+vi.mock("svg2pdf.js", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("svg2pdf.js")>();
+	return { ...actual, svg2pdf: vi.fn(actual.svg2pdf) };
+});
 
 const note = (duration: Duration): ScoreElement => ({
 	kind: "note",
@@ -103,6 +116,10 @@ describe("buildPdf", () => {
 		});
 	});
 
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
 	const pageCount = (text: string) =>
 		(text.match(/\/Type\s*\/Page\b/g) ?? []).length;
 
@@ -145,10 +162,134 @@ describe("buildPdf", () => {
 		);
 	});
 
-	it("retire le dessin temporaire même si les réglages sont invalides", async () => {
+	it("refuse des réglages invalides", async () => {
 		await expect(
 			buildPdf([note("q")], { ...DEFAULT_SETTINGS, fifths: 99 }),
 		).rejects.toThrow(RangeError);
+	});
+
+	it("retire le dessin temporaire et propage l'erreur quand la génération échoue en cours de route", async () => {
+		vi.mocked(svg2pdf).mockRejectedValueOnce(new Error("svg2pdf a échoué"));
+		await expect(buildPdf(repeat("q", 8), DEFAULT_SETTINGS)).rejects.toThrow(
+			"svg2pdf a échoué",
+		);
+		expect(svg2pdf).toHaveBeenCalled();
 		expect(document.body.children).toHaveLength(0);
+	});
+
+	it("écrit les libellés de statut en Helvetica, sans caractère hors WinAnsi", async () => {
+		// Une mesure trop remplie (5/4), puis une mesure en cours (1/4).
+		const score = [note("q"), note("q"), note("q"), note("h"), note("q")];
+		await buildPdf(score, DEFAULT_SETTINGS);
+		const labels = vi
+			.mocked(svg2pdf)
+			.mock.calls.flatMap(([element]) => [
+				...(element as Element).querySelectorAll("text.measure-status"),
+			]);
+		expect(labels).toHaveLength(2);
+		for (const label of labels) {
+			expect(label.getAttribute("font-family")).toBe("helvetica");
+			expect(label.textContent).toMatch(/^[\x20-\x7E\xA0-\xFF]+$/);
+		}
+	});
+
+	describe("placement sur la page", () => {
+		const RIGHT = 595.28 - 40;
+		const BOTTOM = 841.89 - 40;
+		const placements = () =>
+			vi.mocked(svg2pdf).mock.calls.map(([element, , options]) => ({
+				nativeWidth: Number((element as Element).getAttribute("width")),
+				x: options?.x ?? Number.NaN,
+				y: options?.y ?? Number.NaN,
+				width: options?.width ?? Number.NaN,
+				height: options?.height ?? Number.NaN,
+			}));
+
+		it("garde chaque ligne dans les marges et empile les lignes d'une page vers le bas", async () => {
+			await buildPdf(repeat("q", 160), DEFAULT_SETTINGS);
+			const all = placements();
+			expect(all.length).toBeGreaterThan(2);
+			for (const p of all) {
+				expect(p.x).toBeGreaterThanOrEqual(40);
+				expect(p.y).toBeGreaterThanOrEqual(40);
+				expect(p.x + p.width).toBeLessThanOrEqual(RIGHT + 1e-6);
+				expect(p.y + p.height).toBeLessThanOrEqual(BOTTOM + 1e-6);
+			}
+			// Sur une même page y croît ; un retour à la marge haute ouvre la page suivante.
+			let newPages = 0;
+			all.slice(1).forEach((p, i) => {
+				if (p.y > all[i].y) {
+					return;
+				}
+				expect(p.y).toBe(40);
+				newPages++;
+			});
+			expect(newPages).toBeGreaterThan(0);
+			expect(all.filter((p) => p.y > 40).length).toBeGreaterThan(0);
+		}, 20000);
+
+		it("réduit pour rester dans les marges une mesure seule plus large que la cible", async () => {
+			// Une seule mesure de seize doubles croches, plus large que les 700 px visés.
+			await buildPdf(repeat("16", 16), DEFAULT_SETTINGS);
+			const all = placements();
+			expect(all).toHaveLength(1);
+			expect(all[0].nativeWidth).toBeGreaterThan(RIGHT - 40);
+			expect(all[0].x + all[0].width).toBeLessThanOrEqual(RIGHT + 1e-6);
+			expect(all[0].y + all[0].height).toBeLessThanOrEqual(BOTTOM + 1e-6);
+		});
+	});
+});
+
+describe("police embarquée", () => {
+	const covered = readCmapCodePoints(
+		Uint8Array.from(
+			atob(fontDataUri.slice(fontDataUri.indexOf(",") + 1)),
+			(c) => c.charCodeAt(0),
+		),
+	);
+	const glyphsOf = (score: Score, settings: Settings): number[] => {
+		const container = document.createElement("div");
+		renderStaff(container, 700, score, null, settings);
+		return [...container.querySelectorAll("text:not(.measure-status)")]
+			.flatMap((text) => [...(text.textContent ?? "")])
+			.map((char) => char.codePointAt(0) as number);
+	};
+	const missing = (codePoints: number[]) =>
+		[...new Set(codePoints.filter((code) => !covered.has(code)))].map(
+			(code) => `U+${code.toString(16).toUpperCase()}`,
+		);
+
+	it("contient les glyphes de chaque durée, note et silence", () => {
+		const elements = DURATIONS.flatMap((duration) => [
+			note(duration),
+			{ kind: "rest", duration } as const,
+		]);
+		const glyphs = glyphsOf(elements, DEFAULT_SETTINGS);
+		expect(glyphs.length).toBeGreaterThan(0);
+		expect(missing(glyphs)).toEqual([]);
+	});
+
+	it("contient les glyphes de chaque clé", () => {
+		for (const clef of CLEFS) {
+			expect(
+				missing(glyphsOf([note("q")], { ...DEFAULT_SETTINGS, clef })),
+			).toEqual([]);
+		}
+	});
+
+	it("contient les glyphes des altérations de chaque armure de -7 à 7", () => {
+		for (let fifths = -7; fifths <= 7; fifths++) {
+			expect(
+				missing(glyphsOf([note("q")], { ...DEFAULT_SETTINGS, fifths })),
+			).toEqual([]);
+		}
+	});
+
+	it("contient les glyphes de chaque chiffrage", () => {
+		for (const time of TIME_SIGNATURES) {
+			expect(
+				missing(glyphsOf([note("q")], { ...DEFAULT_SETTINGS, time })),
+			).toEqual([]);
+		}
 	});
 });

@@ -104,6 +104,14 @@ export async function buildPdf(
 				const points = Number.parseFloat(text.getAttribute("font-size") ?? "");
 				text.setAttribute("font-size", String((points * 4) / 3));
 			}
+			// La police embarquée n'a que des glyphes musicaux : les libellés de mesure restent en police standard,
+			// sans pictogramme hors WinAnsi (le texte seul porte déjà le statut).
+			for (const label of svg.querySelectorAll("text.measure-status")) {
+				label.setAttribute("font-family", "helvetica");
+				label.textContent = (label.textContent ?? "")
+					.replace("▲", "!")
+					.replace("…", "...");
+			}
 			const width = Number(svg.getAttribute("width"));
 			const height = Number(svg.getAttribute("height"));
 			// Une ligne plus large que la cible est réduite pour tenir, jamais coupée.

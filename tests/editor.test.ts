@@ -848,7 +848,7 @@ describe("createEditor : export PDF", () => {
 		]);
 	});
 
-	it("annonce l'échec de génération sans téléchargement ni dessin résiduel", async () => {
+	it("annonce l'échec de génération sans téléchargement", async () => {
 		const { downloads } = stubDownload();
 		clickAt(300, Y_SOL4);
 		vi.mocked(buildPdf).mockRejectedValueOnce(new Error("mémoire"));
@@ -859,6 +859,40 @@ describe("createEditor : export PDF", () => {
 			),
 		);
 		expect(downloads).toEqual([]);
+	});
+
+	it("journalise l'erreur d'une génération en échec", async () => {
+		stubDownload();
+		const consoleError = vi
+			.spyOn(console, "error")
+			.mockImplementation(() => {});
+		clickAt(300, Y_SOL4);
+		const failure = new Error("mémoire");
+		vi.mocked(buildPdf).mockRejectedValueOnce(failure);
+		choose(EXPORT);
+		await vi.waitFor(() =>
+			expect(consoleError).toHaveBeenCalledWith("Export PDF échoué", failure),
+		);
+	});
+
+	it("annonce l'échec du téléchargement, sans lien résiduel et en retirant l'occupation", async () => {
+		const { downloads } = stubDownload();
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		clickAt(300, Y_SOL4);
+		vi.mocked(URL.createObjectURL).mockImplementationOnce(() => {
+			throw new Error("URL indisponible");
+		});
+		choose(EXPORT);
+		await vi.waitFor(() =>
+			expect(announcement()).toBe(
+				"Échec de l'export PDF. Réessayez ; si le problème persiste, utilisez Exporter MusicXML.",
+			),
+		);
+		expect(downloads).toEqual([]);
+		expect(document.querySelector("a[download]")).toBeNull();
+		const button = root.querySelector(EXPORT) as HTMLButtonElement;
+		expect(button.hasAttribute("aria-busy")).toBe(false);
+		expect(button.hasAttribute("aria-disabled")).toBe(false);
 	});
 
 	it("ignore les clics répétés pendant l'export et signale l'occupation", async () => {
