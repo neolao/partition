@@ -161,7 +161,7 @@ describe("renderStaff : mesures", () => {
 		]);
 	});
 
-	it("signale une mesure trop remplie et une mesure non finale incomplète", () => {
+	it("signale une mesure trop remplie, puis la dernière mesure en cours", () => {
 		const el = makeContainer();
 		const wholeNote = { kind: "rest", duration: "w" } as const;
 		// 2 noires + ronde = 6/4 -> trop remplie ; puis 1 noire seule en fin.

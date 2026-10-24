@@ -1,7 +1,7 @@
 # Ubiquitous Language
 
 ## Portée
-Ensemble de cinq lignes en clé de sol sur lequel se posent les notes et les silences. Une seule portée est affichée.
+Ensemble de cinq lignes (clé de sol, de fa ou d'ut) sur lequel se posent les notes et les silences ; une portée est dessinée par mesure.
 _Sources: `src/staff.ts`_
 
 ## Note
@@ -25,3 +25,11 @@ _Sources: `src/editor.ts`_
 ## Export MusicXML
 Téléchargement de la partition sous forme de fichier MusicXML (`partition.musicxml`), format standard lisible par d'autres logiciels de notation.
 _Sources: `src/musicxml.ts`, `src/editor.ts`_
+
+## Mesure
+Groupe consécutif de notes et de silences dont la durée totale suit le chiffrage ; complète, trop remplie ou en cours (dernière mesure).
+_Sources: `src/score.ts`_
+
+## Réglages
+Clé, armure et chiffrage de la partition.
+_Sources: `src/score.ts`_

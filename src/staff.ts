@@ -44,7 +44,6 @@ const STATUS_CHAR_WIDTH = 7;
 const STATUS_PADDING = 8;
 const STATUS_COLORS = {
 	overfull: "#b00020",
-	incomplete: "#8a4b00",
 	"in-progress": "#555",
 } as const;
 
@@ -100,7 +99,6 @@ function toStaveNote(element: ScoreElement, clef: Clef): StaveNote {
 /** Texte et libellé de statut d'une mesure, ou null si rien à signaler. */
 function statusLabel(
 	measure: Measure,
-	isLast: boolean,
 	time: Settings["time"],
 ): { status: keyof typeof STATUS_COLORS; text: string } | null {
 	const detail = `${fillName(measure.ticks)} sur ${timeName(time)}`;
@@ -108,9 +106,8 @@ function statusLabel(
 		return { status: "overfull", text: `▲ Trop remplie : ${detail}` };
 	}
 	if (measure.status === "incomplete") {
-		return isLast
-			? { status: "in-progress", text: `… En cours : ${detail}` }
-			: { status: "incomplete", text: `▼ Incomplète : ${detail}` };
+		// Seule la dernière mesure peut être incomplète : les autres se ferment une fois pleines.
+		return { status: "in-progress", text: `… En cours : ${detail}` };
 	}
 	return null;
 }
@@ -213,11 +210,7 @@ export function renderStaff(
 				.addTimeSignature(timeName(settings.time));
 		}
 		const notes = allNotes.slice(measure.start, measure.end);
-		const label = statusLabel(
-			measure,
-			i === measures.length - 1,
-			settings.time,
-		);
+		const label = statusLabel(measure, settings.time);
 		const modifiersWidth = stave.getNoteStartX() - MARGIN;
 		let voice: Voice | null = null;
 		let formatter: Formatter | null = null;

@@ -479,8 +479,31 @@ describe("createEditor : import MusicXML", () => {
 	});
 
 	it("permet de réimporter le même fichier", async () => {
+		const assigned: string[] = [];
+		Object.defineProperty(input(), "value", {
+			get: () => "nom-de-fichier",
+			set: (value: string) => assigned.push(value),
+			configurable: true,
+		});
 		await importText(VALID);
-		expect(input().value).toBe("");
+		expect(assigned).toEqual([""]);
+	});
+
+	it("garde les réglages quand l'import échoue", async () => {
+		const clef = root.querySelector<HTMLSelectElement>(
+			'select[data-setting="clef"]',
+		) as HTMLSelectElement;
+		clef.value = "bass";
+		clef.dispatchEvent(new Event("change", { bubbles: true }));
+		await importText("pas du xml");
+		expect(clef.value).toBe("bass");
+	});
+
+	it("efface l'avertissement précédent après un import sans avertissement", async () => {
+		await importText(VALID.replace("</measure>", "<direction/></measure>"));
+		expect(notice().hidden).toBe(false);
+		await importText(VALID);
+		expect(notice().hidden).toBe(true);
 	});
 });
 

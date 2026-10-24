@@ -126,11 +126,12 @@ function durationOf(note: Element, divisions: number): Duration | null {
 	}
 	// Sans <type> (silence de mesure entière notamment), on déduit la durée de <duration>.
 	const length = Number(childText(note, "duration"));
-	const fromLength = DURATIONS.find(
-		(candidate) =>
-			(durationTicks(candidate) * divisions) / DIVISIONS === length,
+	return (
+		DURATIONS.find(
+			(candidate) =>
+				(durationTicks(candidate) * divisions) / DIVISIONS === length,
+		) ?? null
 	);
-	return fromLength ?? null;
 }
 
 function pitchOf(note: Element, warnings: Set<string>): Pitch | null {

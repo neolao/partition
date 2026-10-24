@@ -360,9 +360,16 @@ export function createEditor(root: HTMLElement): { redraw: () => void } {
 				settings: importedSettings,
 				warnings,
 			} = fromMusicXml(await file.text());
+			const previousSettings = settings;
 			settings = importedSettings;
-			syncSettings();
-			update(imported, null, "Partition importée");
+			try {
+				syncSettings();
+				update(imported, null, "Partition importée");
+			} catch (error) {
+				settings = previousSettings;
+				syncSettings();
+				throw error;
+			}
 			showNotice(
 				"status",
 				warnings.length > 0

@@ -208,6 +208,34 @@ const noteXml = (step: string, octave: number, type: string, more = "") =>
 	`<note><pitch><step>${step}</step><octave>${octave}</octave></pitch><duration>4</duration><type>${type}</type>${more}</note>`;
 
 describe("fromMusicXml", () => {
+	it("ignore avec un avertissement une note sans hauteur valide et garde les autres", () => {
+		const xml = wrap(
+			`<measure number="1"><attributes><divisions>4</divisions></attributes><note><unpitched/><duration>4</duration><type>quarter</type></note>${noteXml("H", 4, "quarter")}${noteXml("C", 4, "quarter")}</measure>`,
+		);
+		const result = fromMusicXml(xml);
+		expect(result.score).toEqual([
+			{ kind: "note", pitch: { step: "c", octave: 4 }, duration: "q" },
+		]);
+		expect(result.warnings).toEqual(["Notes sans hauteur valide ignorées"]);
+	});
+
+	it.each([
+		["une durée qui ne correspond à aucune valeur", "<duration>5</duration>"],
+		["l'absence de durée", ""],
+	])(
+		"ignore avec un avertissement une note sans type et avec %s",
+		(_name, duration) => {
+			const xml = wrap(
+				`<measure number="1"><attributes><divisions>4</divisions></attributes><note><rest/>${duration}</note></measure>`,
+			);
+			const result = fromMusicXml(xml);
+			expect(result.score).toEqual([]);
+			expect(result.warnings).toEqual([
+				"Notes de durée non prise en charge ignorées",
+			]);
+		},
+	);
+
 	it("réimporte à l'identique un export (notes, silences, durées)", () => {
 		const score: Score = [
 			{ kind: "note", pitch: { step: "c", octave: 4 }, duration: "q" },
