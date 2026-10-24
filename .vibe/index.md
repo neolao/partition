@@ -10,6 +10,7 @@
 - [`modules/musicxml.md`](modules/musicxml.md) — export MusicXML de la partition.
 - [`modules/score.md`](modules/score.md) — modèle de partition pur.
 - [`modules/staff.md`](modules/staff.md) — rendu SVG de la portée avec VexFlow.
+- [`modules/storage.md`](modules/storage.md) — sauvegarde et restauration de la partition dans le navigateur.
 
 ## Observed patterns
 
@@ -20,3 +21,4 @@
 
 - [`models.md`](models.md) — data models
 - [`glossary.md`](glossary.md) — ubiquitous language
+- [`decisions/`](decisions/) — architectural decision records

@@ -23,6 +23,7 @@ import {
 	yForPitch,
 } from "./score";
 import { renderStaff, type StaffGeometry } from "./staff";
+import { loadScore, saveScore, UnreadableSaveError } from "./storage";
 
 type Mode = "note" | "rest";
 
@@ -37,6 +38,18 @@ const SCROLL_MARGIN = 20;
 const FIFTHS_RANGE = Array.from({ length: 15 }, (_, i) => i - 7);
 
 type SettingName = "clef" | "fifths" | "time";
+
+const STORAGE_WARNING =
+	"Sauvegarde automatique impossible : vos modifications seront perdues à la fermeture. Utilisez Exporter MusicXML pour les conserver.";
+
+/** Le stockage local du navigateur, ou null si son simple accès est refusé. */
+function browserStorage(): Storage | null {
+	try {
+		return window.localStorage;
+	} catch {
+		return null;
+	}
+}
 
 const capitalize = (text: string) =>
 	text.charAt(0).toUpperCase() + text.slice(1);
@@ -72,8 +85,14 @@ function createSetting(
 	return { wrapper, select };
 }
 
-/** Monte l'éditeur (palette, portée, aide, annonces) dans le conteneur. */
-export function createEditor(root: HTMLElement): { redraw: () => void } {
+/**
+ * Monte l'éditeur (palette, portée, aide, annonces) dans le conteneur.
+ * La partition est sauvegardée dans `storage` après chaque modification et restaurée à l'ouverture.
+ */
+export function createEditor(
+	root: HTMLElement,
+	storage: Storage | null = browserStorage(),
+): { redraw: () => void } {
 	let score: Score = [];
 	let selected: number | null = null;
 	let duration: Duration = "q";
@@ -163,8 +182,19 @@ export function createEditor(root: HTMLElement): { redraw: () => void } {
 
 	root.replaceChildren(toolbar, notice, staff, hint, live);
 
-	function showNotice(role: "status" | "alert", lines: string[]) {
-		notice.setAttribute("role", role);
+	// La zone partage deux sources : le dernier import (ou la sauvegarde illisible) et l'état du stockage.
+	let importNotice: { role: "status" | "alert"; lines: string[] } = {
+		role: "status",
+		lines: [],
+	};
+	let storageFailed = false;
+	let unreadableSaveShown = false;
+
+	function renderNotice() {
+		const lines = storageFailed
+			? [...importNotice.lines, STORAGE_WARNING]
+			: importNotice.lines;
+		notice.setAttribute("role", storageFailed ? "alert" : importNotice.role);
 		notice.replaceChildren(
 			...lines.map((line) => {
 				const paragraph = document.createElement("p");
@@ -173,6 +203,36 @@ export function createEditor(root: HTMLElement): { redraw: () => void } {
 			}),
 		);
 		notice.hidden = lines.length === 0;
+	}
+
+	function showNotice(role: "status" | "alert", lines: string[]) {
+		importNotice = { role, lines };
+		unreadableSaveShown = false;
+		renderNotice();
+	}
+
+	/** Sauvegarde automatique : avertit une fois par épisode d'échec, annonce le retour à la normale. */
+	function persist() {
+		if (storage === null) {
+			return;
+		}
+		try {
+			saveScore(storage, score, settings);
+		} catch {
+			if (!storageFailed) {
+				storageFailed = true;
+				renderNotice();
+			}
+			return;
+		}
+		if (unreadableSaveShown) {
+			showNotice("status", []);
+		}
+		if (storageFailed) {
+			storageFailed = false;
+			renderNotice();
+			live.textContent = `${live.textContent}. Sauvegarde automatique rétablie`;
+		}
 	}
 
 	function refreshToolbar() {
@@ -251,6 +311,7 @@ export function createEditor(root: HTMLElement): { redraw: () => void } {
 		redraw();
 		const count = geometry.measures.length;
 		live.textContent = `${label} : ${count} mesure${count > 1 ? "s" : ""}`;
+		persist();
 	}
 
 	function update(
@@ -266,6 +327,7 @@ export function createEditor(root: HTMLElement): { redraw: () => void } {
 			withMeasureState && nextSelected !== null
 				? message + measureSuffix(nextSelected)
 				: message;
+		persist();
 	}
 
 	function hit(x: number, y: number): number | null {
@@ -511,6 +573,32 @@ export function createEditor(root: HTMLElement): { redraw: () => void } {
 		}
 	});
 
+	function restore(source: Storage) {
+		try {
+			const saved = loadScore(source);
+			if (saved !== null) {
+				({ score, settings } = saved);
+				live.textContent = "Partition restaurée";
+			}
+		} catch (error) {
+			if (error instanceof UnreadableSaveError) {
+				showNotice("alert", [
+					"La sauvegarde précédente est illisible ; elle sera remplacée à la première modification.",
+				]);
+				unreadableSaveShown = true;
+			} else {
+				storageFailed = true;
+				renderNotice();
+			}
+		}
+	}
+
+	if (storage === null) {
+		storageFailed = true;
+		renderNotice();
+	} else {
+		restore(storage);
+	}
 	refreshToolbar();
 	syncSettings();
 	redraw();

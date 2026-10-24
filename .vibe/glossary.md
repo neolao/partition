@@ -38,3 +38,8 @@ _Sources: `src/score.ts`_
 Téléchargement de la partition sous forme de fichier PDF A4 (`partition.pdf`) : les mesures sont réparties en lignes puis en pages sans jamais être coupées ; une partition vide n'est pas exportée.
 **Do not confuse with:** Export MusicXML
 _Sources: `src/pdf.ts`, `src/editor.ts`_
+
+## Sauvegarde automatique
+Enregistrement de la partition et de ses réglages dans le navigateur après chaque modification, et restauration à la réouverture du site ; un avertissement signale un stockage indisponible ou une sauvegarde illisible.
+**Do not confuse with:** Export MusicXML
+_Sources: `src/storage.ts`, `src/editor.ts`_

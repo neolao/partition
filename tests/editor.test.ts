@@ -23,14 +23,19 @@ const Y_DO6 = 40;
 let root: HTMLElement;
 let staff: HTMLElement;
 
-beforeEach(() => {
+function mount(storage?: Storage): void {
 	document.body.replaceChildren();
 	root = document.createElement("div");
 	document.body.append(root);
-	createEditor(root);
+	createEditor(root, storage);
 	staff = root.querySelector<HTMLElement>(".staff") as HTMLElement;
 	// jsdom n'a pas de mise en page : la portée est placée à l'origine de la page.
 	staff.getBoundingClientRect = () => new DOMRect(0, 0, 600, 140);
+}
+
+beforeEach(() => {
+	localStorage.clear();
+	mount(localStorage);
 });
 
 afterEach(() => {
@@ -927,5 +932,230 @@ describe("createEditor : export PDF", () => {
 		button.click();
 		await vi.waitFor(() => expect(announcement()).toContain("Échec"));
 		expect(button.hasAttribute("aria-busy")).toBe(false);
+	});
+});
+
+describe("createEditor : sauvegarde automatique", () => {
+	const WARNING =
+		"Sauvegarde automatique impossible : vos modifications seront perdues à la fermeture. Utilisez Exporter MusicXML pour les conserver.";
+	const notice = () =>
+		root.querySelector<HTMLElement>(".notice") as HTMLElement;
+	const select = (name: string) =>
+		root.querySelector<HTMLSelectElement>(
+			`select[data-setting="${name}"]`,
+		) as HTMLSelectElement;
+
+	function change(name: string, value: string) {
+		select(name).value = value;
+		select(name).dispatchEvent(new Event("change", { bubbles: true }));
+	}
+
+	async function importText(text: string) {
+		const input = root.querySelector<HTMLInputElement>('input[type="file"]');
+		Object.defineProperty(input, "files", {
+			value: [new File([text], "p.musicxml")],
+			configurable: true,
+		});
+		input?.dispatchEvent(new Event("change"));
+		await vi.waitFor(() => expect(announcement()).toContain("import"));
+	}
+
+	/** Stockage dont l'écriture lève tant que `failing.value` est vrai. */
+	function flakyStorage() {
+		const failing = { value: true, writes: 0 };
+		const real = new Map<string, string>();
+		const storage = {
+			getItem: (key: string) => real.get(key) ?? null,
+			setItem: (key: string, value: string) => {
+				failing.writes++;
+				if (failing.value) {
+					throw new DOMException("plein", "QuotaExceededError");
+				}
+				real.set(key, value);
+			},
+		} as unknown as Storage;
+		return { storage, failing };
+	}
+
+	it("restaure score, clé, armure et chiffrage à la réouverture", () => {
+		clickAt(100, Y_SOL4);
+		clickAt(200, Y_MI4);
+		change("clef", "bass");
+		change("fifths", "2");
+		change("time", "3/4");
+		const heads = headYs();
+		mount(localStorage);
+		expect(headYs()).toEqual(heads);
+		expect(select("clef").value).toBe("bass");
+		expect(select("fifths").value).toBe("2");
+		expect(select("time").value).toBe("3/4");
+		expect(announcement()).toBe("Partition restaurée");
+		expect(notice().hidden).toBe(true);
+	});
+
+	it("ne vole pas le focus à la restauration", () => {
+		clickAt(100, Y_SOL4);
+		const outside = document.createElement("button");
+		document.body.append(outside);
+		outside.focus();
+		const focus = vi.spyOn(HTMLElement.prototype, "focus");
+		const host = document.createElement("div");
+		document.body.append(host);
+		createEditor(host, localStorage);
+		expect(focus).not.toHaveBeenCalled();
+		expect(document.activeElement).toBe(outside);
+		focus.mockRestore();
+	});
+
+	it("sauvegarde après un déplacement", () => {
+		clickAt(100, Y_SOL4);
+		press("ArrowUp");
+		mount(localStorage);
+		expect(headYs()).toEqual([85]);
+	});
+
+	it("sauvegarde après une suppression", () => {
+		clickAt(100, Y_SOL4);
+		press("Delete");
+		mount(localStorage);
+		expect(headYs()).toEqual([]);
+		expect(announcement()).toBe("Partition restaurée");
+	});
+
+	it("sauvegarde les réglages d'une partition vide", () => {
+		change("clef", "alto");
+		mount(localStorage);
+		expect(select("clef").value).toBe("alto");
+	});
+
+	it("sauvegarde un import MusicXML", async () => {
+		await importText(
+			'<score-partwise version="4.0"><part-list/><part id="P1"><measure number="1"><attributes><divisions>4</divisions><clef><sign>F</sign><line>4</line></clef></attributes><note><pitch><step>A</step><octave>3</octave></pitch><duration>4</duration><type>quarter</type></note></measure></part></score-partwise>',
+		);
+		mount(localStorage);
+		expect(headYs()).toHaveLength(1);
+		expect(select("clef").value).toBe("bass");
+	});
+
+	it("n'affiche aucune notice à la première visite", () => {
+		expect(notice().hidden).toBe(true);
+		expect(announcement()).toBe("");
+		expect(headYs()).toEqual([]);
+	});
+
+	it("ne restaure ni la durée ni le mode", () => {
+		choose('[data-duration="h"]');
+		choose('[data-mode="rest"]');
+		clickAt(100, Y_SOL4);
+		mount(localStorage);
+		expect(
+			root.querySelector('[data-duration="q"]')?.getAttribute("aria-pressed"),
+		).toBe("true");
+		expect(
+			root.querySelector('[data-mode="note"]')?.getAttribute("aria-pressed"),
+		).toBe("true");
+	});
+
+	it("affiche une notice et un éditeur vide quand la sauvegarde est illisible", () => {
+		clickAt(100, Y_SOL4);
+		localStorage.setItem(localStorage.key(0) as string, "pas du xml");
+		mount(localStorage);
+		expect(headYs()).toEqual([]);
+		expect(notice().textContent).toContain(
+			"La sauvegarde précédente est illisible ; elle sera remplacée à la première modification.",
+		);
+		expect(notice().hidden).toBe(false);
+	});
+
+	it("laisse la donnée illisible intacte jusqu'à la première modification, puis la remplace", () => {
+		clickAt(100, Y_SOL4);
+		const key = localStorage.key(0) as string;
+		localStorage.setItem(key, "pas du xml");
+		mount(localStorage);
+		expect(localStorage.getItem(key)).toBe("pas du xml");
+		clickAt(100, Y_SOL4);
+		expect(localStorage.getItem(key)).toContain("score-partwise");
+		mount(localStorage);
+		expect(headYs()).toHaveLength(1);
+	});
+
+	it("efface la notice de sauvegarde illisible dès que la sauvegarde est remplacée", () => {
+		clickAt(100, Y_SOL4);
+		localStorage.setItem(localStorage.key(0) as string, "pas du xml");
+		mount(localStorage);
+		expect(notice().hidden).toBe(false);
+		clickAt(100, Y_SOL4);
+		expect(notice().hidden).toBe(true);
+	});
+
+	it("avertit une seule fois quand l'écriture échoue et reste utilisable", () => {
+		const { storage, failing } = flakyStorage();
+		mount(storage);
+		clickAt(100, Y_SOL4);
+		expect(notice().textContent).toBe(WARNING);
+		expect(notice().getAttribute("role")).toBe("alert");
+		expect(notice().hidden).toBe(false);
+		const first = notice().firstChild;
+		clickAt(200, Y_MI4);
+		expect(headYs()).toHaveLength(2);
+		expect(notice().firstChild).toBe(first);
+		expect(notice().querySelectorAll("p")).toHaveLength(1);
+		expect(failing.writes).toBe(2);
+	});
+
+	it("efface l'avertissement et l'annonce quand la sauvegarde est rétablie", () => {
+		const { storage, failing } = flakyStorage();
+		mount(storage);
+		clickAt(100, Y_SOL4);
+		failing.value = false;
+		clickAt(200, Y_MI4);
+		expect(notice().hidden).toBe(true);
+		expect(announcement()).toContain("Sauvegarde automatique rétablie");
+		failing.value = true;
+		clickAt(300, Y_SOL4);
+		expect(notice().textContent).toBe(WARNING);
+	});
+
+	it("conserve l'avertissement de stockage après un import réussi", async () => {
+		const { storage } = flakyStorage();
+		mount(storage);
+		await importText(
+			'<score-partwise version="4.0"><part-list/><part id="P1"><measure number="1"><note><rest/><duration>4</duration><type>quarter</type></note></measure></part></score-partwise>',
+		);
+		expect(notice().textContent).toContain(WARNING);
+	});
+
+	it("conserve l'avertissement de stockage après un import en échec", async () => {
+		const { storage } = flakyStorage();
+		mount(storage);
+		clickAt(100, Y_SOL4);
+		await importText("pas du xml");
+		expect(notice().textContent).toContain(WARNING);
+		expect(notice().textContent).toContain("Échec de l'import");
+	});
+
+	it("avertit dès l'ouverture quand l'accès à localStorage lève", () => {
+		vi.spyOn(window, "localStorage", "get").mockImplementation(() => {
+			throw new DOMException("refusé", "SecurityError");
+		});
+		mount();
+		expect(notice().textContent).toBe(WARNING);
+		clickAt(100, Y_SOL4);
+		expect(headYs()).toHaveLength(1);
+		expect(notice().querySelectorAll("p")).toHaveLength(1);
+	});
+
+	it("avertit à l'ouverture quand la lecture du stockage lève", () => {
+		const denied = {
+			getItem: () => {
+				throw new DOMException("refusé", "SecurityError");
+			},
+			setItem: () => {
+				throw new DOMException("refusé", "SecurityError");
+			},
+		} as unknown as Storage;
+		mount(denied);
+		expect(notice().textContent).toBe(WARNING);
+		expect(headYs()).toEqual([]);
 	});
 });
