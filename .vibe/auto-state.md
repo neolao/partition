@@ -1,10 +1,8 @@
 ---
-status: running
+status: idle
 started: 2026-10-23T23:30
 limit: none
 push: false
-current: 009
-attempt: 1
 ---
 # Auto run journal
 
@@ -19,4 +17,4 @@ attempt: 1
 - 004 — feature — done (e7d5130, repris après limite d'usage)
 - 005 — feature — done (d1991ff)
 - 008 — feature — done (abd7c45)
-- 009 — feature — in progress
+- 009 — feature — blocked: doublon possible de 006/007 (449f693)
