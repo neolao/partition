@@ -2,11 +2,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createEditor } from "../src/editor";
 import { toMusicXml } from "../src/musicxml";
+import { buildPdf } from "../src/pdf";
 import { DEFAULT_SETTINGS } from "../src/score";
 
 vi.mock("../src/musicxml", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../src/musicxml")>();
 	return { ...actual, toMusicXml: vi.fn(actual.toMusicXml) };
+});
+
+vi.mock("../src/pdf", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../src/pdf")>();
+	return { ...actual, buildPdf: vi.fn(actual.buildPdf) };
 });
 
 // Portée rendue : lignes à y = 60, 70, 80, 90, 100 (mi4 en bas, fa5 en haut).
@@ -743,5 +749,149 @@ describe("createEditor : import des réglages", () => {
 		expect(value("fifths")).toBe("-3");
 		expect(value("time")).toBe("3/4");
 		expect(headYs()).toEqual([60]);
+	});
+});
+
+describe("createEditor : export PDF", () => {
+	const EXPORT = '[data-action="export-pdf"]';
+
+	function stubDownload() {
+		const revoked: string[] = [];
+		const downloads: { name: string; href: string }[] = [];
+		const blobs: Blob[] = [];
+		vi.spyOn(URL, "createObjectURL").mockImplementation((blob) => {
+			blobs.push(blob as Blob);
+			return "blob:pdf";
+		});
+		vi.spyOn(URL, "revokeObjectURL").mockImplementation((url) => {
+			revoked.push(url);
+		});
+		vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
+			this: HTMLAnchorElement,
+		) {
+			downloads.push({ name: this.download, href: this.href });
+		});
+		return { downloads, revoked, blobs };
+	}
+
+	beforeEach(() => {
+		// jsdom ne mesure pas les textes SVG : svg2pdf en a besoin pour les lire.
+		Object.defineProperty(SVGElement.prototype, "getBBox", {
+			configurable: true,
+			value: () => ({ x: 0, y: 0, width: 10, height: 10 }),
+		});
+	});
+
+	it("place un bouton « Exporter PDF » hors des groupes à état pressé", () => {
+		const button = root.querySelector<HTMLButtonElement>(EXPORT);
+		expect(button?.textContent).toBe("Exporter PDF");
+		expect(button?.hasAttribute("aria-pressed")).toBe(false);
+	});
+
+	it("télécharge partition.pdf contenant un PDF et l'annonce", async () => {
+		const { downloads, blobs, revoked } = stubDownload();
+		clickAt(300, Y_SOL4);
+		choose(EXPORT);
+		await vi.waitFor(() => expect(downloads).toHaveLength(1));
+		expect(downloads[0]).toEqual({ name: "partition.pdf", href: "blob:pdf" });
+		expect((await blobs[0].text()).startsWith("%PDF")).toBe(true);
+		expect(announcement()).toBe("partition.pdf téléchargé");
+		await vi.waitFor(() => expect(revoked).toEqual(["blob:pdf"]));
+		expect(document.querySelector("a[download]")).toBeNull();
+	});
+
+	it("exporte la partition et ses réglages sans toucher à l'affichage", async () => {
+		stubDownload();
+		clickAt(300, Y_SOL4);
+		const before = staff.innerHTML;
+		choose(EXPORT);
+		await vi.waitFor(() =>
+			expect(announcement()).toBe("partition.pdf téléchargé"),
+		);
+		expect(buildPdf).toHaveBeenCalledWith(
+			[{ kind: "note", pitch: { step: "g", octave: 4 }, duration: "q" }],
+			DEFAULT_SETTINGS,
+		);
+		expect(staff.innerHTML).toBe(before);
+		expect(staff.querySelector(".selection-mark")).not.toBeNull();
+	});
+
+	it("n'exporte rien et explique pourquoi pour une partition vide", async () => {
+		const { downloads } = stubDownload();
+		choose(EXPORT);
+		expect(announcement()).toBe(
+			"Partition vide : ajoutez au moins une note avant d'exporter en PDF.",
+		);
+		expect(downloads).toEqual([]);
+		expect(buildPdf).not.toHaveBeenCalled();
+	});
+
+	it("ré-annonce un message identique en vidant d'abord la zone d'annonces", () => {
+		stubDownload();
+		const live = root.querySelector("[aria-live]") as HTMLElement;
+		const writes: string[] = [];
+		let current = "";
+		Object.defineProperty(live, "textContent", {
+			get: () => current,
+			set: (value: string) => {
+				writes.push(value);
+				current = value;
+			},
+		});
+		choose(EXPORT);
+		choose(EXPORT);
+		expect(writes).toEqual([
+			"",
+			"Partition vide : ajoutez au moins une note avant d'exporter en PDF.",
+			"",
+			"Partition vide : ajoutez au moins une note avant d'exporter en PDF.",
+		]);
+	});
+
+	it("annonce l'échec de génération sans téléchargement ni dessin résiduel", async () => {
+		const { downloads } = stubDownload();
+		clickAt(300, Y_SOL4);
+		vi.mocked(buildPdf).mockRejectedValueOnce(new Error("mémoire"));
+		choose(EXPORT);
+		await vi.waitFor(() =>
+			expect(announcement()).toBe(
+				"Échec de l'export PDF. Réessayez ; si le problème persiste, utilisez Exporter MusicXML.",
+			),
+		);
+		expect(downloads).toEqual([]);
+	});
+
+	it("ignore les clics répétés pendant l'export et signale l'occupation", async () => {
+		const { downloads } = stubDownload();
+		clickAt(300, Y_SOL4);
+		let release: (blob: Blob) => void = () => {};
+		vi.mocked(buildPdf).mockImplementationOnce(
+			() => new Promise<Blob>((resolve) => (release = resolve)),
+		);
+		const button = root.querySelector<HTMLButtonElement>(
+			EXPORT,
+		) as HTMLButtonElement;
+		button.click();
+		button.click();
+		expect(button.getAttribute("aria-busy")).toBe("true");
+		expect(button.getAttribute("aria-disabled")).toBe("true");
+		expect(button.disabled).toBe(false);
+		release(new Blob(["%PDF"], { type: "application/pdf" }));
+		await vi.waitFor(() => expect(downloads).toHaveLength(1));
+		expect(buildPdf).toHaveBeenCalledTimes(1);
+		expect(button.hasAttribute("aria-busy")).toBe(false);
+		expect(button.hasAttribute("aria-disabled")).toBe(false);
+	});
+
+	it("libère le bouton après un échec", async () => {
+		stubDownload();
+		clickAt(300, Y_SOL4);
+		vi.mocked(buildPdf).mockRejectedValueOnce(new Error("x"));
+		const button = root.querySelector<HTMLButtonElement>(
+			EXPORT,
+		) as HTMLButtonElement;
+		button.click();
+		await vi.waitFor(() => expect(announcement()).toContain("Échec"));
+		expect(button.hasAttribute("aria-busy")).toBe(false);
 	});
 });

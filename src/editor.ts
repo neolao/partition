@@ -1,4 +1,5 @@
 import { fromMusicXml, toMusicXml } from "./musicxml";
+import { buildPdf } from "./pdf";
 import {
 	assertSettings,
 	CLEF_NAMES,
@@ -119,6 +120,9 @@ export function createEditor(root: HTMLElement): { redraw: () => void } {
 	const exportButton = createButton("Exporter MusicXML", {
 		action: "export-musicxml",
 	});
+	const exportPdfButton = createButton("Exporter PDF", {
+		action: "export-pdf",
+	});
 	const importButton = createButton("Importer MusicXML", {
 		action: "import-musicxml",
 	});
@@ -133,6 +137,7 @@ export function createEditor(root: HTMLElement): { redraw: () => void } {
 		fifthsSetting.wrapper,
 		timeSetting.wrapper,
 		exportButton,
+		exportPdfButton,
 		importButton,
 		fileInput,
 	);
@@ -327,29 +332,73 @@ export function createEditor(root: HTMLElement): { redraw: () => void } {
 		return true;
 	}
 
-	function exportMusicXml() {
+	/** Télécharge le blob sous ce nom ; le lien temporaire et l'URL d'objet sont libérés même en cas d'échec. */
+	function downloadBlob(blob: Blob, filename: string) {
 		let url: string | null = null;
 		let link: HTMLAnchorElement | null = null;
 		try {
-			const blob = new Blob([toMusicXml(score, settings)], {
-				type: "application/vnd.recordare.musicxml+xml",
-			});
 			url = URL.createObjectURL(blob);
 			link = document.createElement("a");
 			link.href = url;
-			link.download = "partition.musicxml";
+			link.download = filename;
 			document.body.append(link);
 			link.click();
-			live.textContent = "Partition exportée";
-		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
-			live.textContent = `Échec de l'export : ${message}`;
 		} finally {
 			link?.remove();
 			if (url !== null) {
 				const exportedUrl = url;
 				setTimeout(() => URL.revokeObjectURL(exportedUrl), 0);
 			}
+		}
+	}
+
+	function exportMusicXml() {
+		try {
+			downloadBlob(
+				new Blob([toMusicXml(score, settings)], {
+					type: "application/vnd.recordare.musicxml+xml",
+				}),
+				"partition.musicxml",
+			);
+			live.textContent = "Partition exportée";
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			live.textContent = `Échec de l'export : ${message}`;
+		}
+	}
+
+	// Vider la zone avant d'écrire fait ré-annoncer un message identique.
+	function announce(message: string) {
+		live.textContent = "";
+		live.textContent = message;
+	}
+
+	let exportingPdf = false;
+
+	async function exportPdf() {
+		if (exportingPdf) {
+			return;
+		}
+		if (score.length === 0) {
+			announce(
+				"Partition vide : ajoutez au moins une note avant d'exporter en PDF.",
+			);
+			return;
+		}
+		exportingPdf = true;
+		exportPdfButton.setAttribute("aria-busy", "true");
+		exportPdfButton.setAttribute("aria-disabled", "true");
+		try {
+			downloadBlob(await buildPdf(score, settings), "partition.pdf");
+			announce("partition.pdf téléchargé");
+		} catch {
+			announce(
+				"Échec de l'export PDF. Réessayez ; si le problème persiste, utilisez Exporter MusicXML.",
+			);
+		} finally {
+			exportingPdf = false;
+			exportPdfButton.removeAttribute("aria-busy");
+			exportPdfButton.removeAttribute("aria-disabled");
 		}
 	}
 
@@ -398,6 +447,10 @@ export function createEditor(root: HTMLElement): { redraw: () => void } {
 		}
 		if (button.dataset.action === "export-musicxml") {
 			exportMusicXml();
+			return;
+		}
+		if (button.dataset.action === "export-pdf") {
+			void exportPdf();
 			return;
 		}
 		if (button.dataset.action === "import-musicxml") {

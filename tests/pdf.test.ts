@@ -1,0 +1,154 @@
+// @vitest-environment jsdom
+import { beforeAll, describe, expect, it } from "vitest";
+import { buildPdf, paginateLines, splitIntoLines } from "../src/pdf";
+import {
+	DEFAULT_SETTINGS,
+	type Duration,
+	type Score,
+	type ScoreElement,
+	splitMeasures,
+} from "../src/score";
+
+const note = (duration: Duration): ScoreElement => ({
+	kind: "note",
+	pitch: { step: "g", octave: 4 },
+	duration,
+});
+const repeat = (duration: Duration, count: number): Score =>
+	Array.from({ length: count }, () => note(duration));
+const measureCount = (score: Score) =>
+	splitMeasures(score, DEFAULT_SETTINGS.time).length;
+
+describe("paginateLines", () => {
+	const layout = { pageHeight: 800, margin: 50, lineHeight: 100 };
+
+	it("place les lignes les unes sous les autres à partir de la marge haute", () => {
+		expect(paginateLines(3, layout)).toEqual([
+			{ page: 0, y: 50 },
+			{ page: 0, y: 150 },
+			{ page: 0, y: 250 },
+		]);
+	});
+
+	it("passe à la page suivante quand la ligne dépasse la marge basse", () => {
+		const slots = paginateLines(8, layout);
+		// Hauteur utile 700 : 7 lignes par page.
+		expect(slots.filter((s) => s.page === 0)).toHaveLength(7);
+		expect(slots[7]).toEqual({ page: 1, y: 50 });
+	});
+
+	it("remplit exactement une page sans en ouvrir une autre", () => {
+		const slots = paginateLines(7, layout);
+		expect(slots[6]).toEqual({ page: 0, y: 650 });
+	});
+
+	it("ne renvoie aucun emplacement pour zéro ligne", () => {
+		expect(paginateLines(0, layout)).toEqual([]);
+	});
+
+	it("refuse une ligne plus haute que la zone utile", () => {
+		expect(() => paginateLines(1, { ...layout, lineHeight: 701 })).toThrow(
+			RangeError,
+		);
+	});
+});
+
+describe("splitIntoLines", () => {
+	it("garde une partition courte sur une seule ligne", () => {
+		const score = repeat("q", 8);
+		expect(splitIntoLines(score, DEFAULT_SETTINGS, 700)).toEqual([score]);
+	});
+
+	it("répartit une partition longue en plusieurs lignes sans couper de mesure", () => {
+		const score = repeat("q", 80);
+		const lines = splitIntoLines(score, DEFAULT_SETTINGS, 500);
+		expect(lines.length).toBeGreaterThan(2);
+		expect(lines.flat()).toEqual(score);
+		for (const line of lines) {
+			expect(line.length % 4).toBe(0);
+		}
+		expect(lines.reduce((sum, line) => sum + measureCount(line), 0)).toBe(
+			measureCount(score),
+		);
+	});
+
+	it("laisse seule sur sa ligne une mesure plus large que la largeur cible", () => {
+		const wide = repeat("16", 16);
+		const narrow = repeat("q", 4);
+		const lines = splitIntoLines(
+			[...wide, ...narrow, ...wide],
+			DEFAULT_SETTINGS,
+			400,
+		);
+		expect(lines.map((line) => line.length)).toEqual([16, 4, 16]);
+	});
+
+	it("garde la dernière mesure incomplète sur la dernière ligne", () => {
+		const score = [...repeat("q", 8), note("q")];
+		const lines = splitIntoLines(score, DEFAULT_SETTINGS, 700);
+		expect(lines.flat()).toEqual(score);
+	});
+
+	it("renvoie une ligne vide pour une partition vide", () => {
+		expect(splitIntoLines([], DEFAULT_SETTINGS, 700)).toEqual([[]]);
+	});
+});
+
+describe("buildPdf", () => {
+	// jsdom ne mesure pas les textes SVG : svg2pdf en a besoin pour les lire.
+	beforeAll(() => {
+		Object.defineProperty(SVGElement.prototype, "getBBox", {
+			configurable: true,
+			value: () => ({ x: 0, y: 0, width: 10, height: 10 }),
+		});
+	});
+
+	const pageCount = (text: string) =>
+		(text.match(/\/Type\s*\/Page\b/g) ?? []).length;
+
+	it("produit un PDF valide pour une courte partition", async () => {
+		const blob = await buildPdf(
+			[note("q"), { kind: "rest", duration: "h" }],
+			DEFAULT_SETTINGS,
+		);
+		expect(blob.type).toBe("application/pdf");
+		const text = await blob.text();
+		expect(text.startsWith("%PDF")).toBe(true);
+		expect(pageCount(text)).toBe(1);
+	});
+
+	it("embarque la police des notes et donne une taille non nulle aux glyphes", async () => {
+		const text = await (await buildPdf([note("q")], DEFAULT_SETTINGS)).text();
+		expect(text).toContain("Bravura");
+		// Taille de police (opérateur Tf) toujours strictement positive.
+		const sizes = [...text.matchAll(/\/F\d+\s+([\d.]+)\s+Tf/g)].map((m) =>
+			Number(m[1]),
+		);
+		expect(sizes.length).toBeGreaterThan(0);
+		expect(sizes.every((size) => size > 0)).toBe(true);
+	});
+
+	it("produit plusieurs pages pour une partition longue", async () => {
+		const blob = await buildPdf(repeat("q", 160), DEFAULT_SETTINGS);
+		expect(pageCount(await blob.text())).toBeGreaterThan(1);
+	}, 20000);
+
+	it("retire le dessin temporaire du document", async () => {
+		await buildPdf(repeat("q", 8), DEFAULT_SETTINGS);
+		expect(document.body.querySelector("svg")).toBeNull();
+		expect(document.body.children).toHaveLength(0);
+	});
+
+	it("refuse une partition vide", async () => {
+		await expect(buildPdf([], DEFAULT_SETTINGS)).rejects.toThrow(
+			"Partition vide",
+		);
+	});
+
+	it("retire le dessin temporaire même si les réglages sont invalides", async () => {
+		await expect(
+			buildPdf([note("q")], { ...DEFAULT_SETTINGS, fifths: 99 }),
+		).rejects.toThrow(RangeError);
+		expect(document.body.children).toHaveLength(0);
+	});
+});
