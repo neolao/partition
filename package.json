@@ -1,6 +1,6 @@
 {
 	"name": "partition",
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"private": true,
 	"description": "Écriture d'une partition de musique sur le web, avec génération d'un PDF à imprimer et import/export MusicXML (site statique)",
 	"type": "module",

@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-25
+
 ### Added
 
 - Une portée vide s'affiche à l'ouverture du site et se redessine à la bonne largeur quand la fenêtre est redimensionnée.
@@ -12,3 +14,5 @@
 - Les utilisateurs peuvent télécharger leur partition en PDF A4 depuis le bouton « Exporter PDF » : les mesures sont réparties en lignes puis en pages sans jamais être coupées, et une partition vide affiche un message clair au lieu d'un PDF vide.
 - Les utilisateurs retrouvent leur partition et ses réglages à la réouverture du site : elle est sauvegardée automatiquement dans le navigateur après chaque modification, et un avertissement s'affiche si la sauvegarde est impossible ou si l'ancienne sauvegarde est illisible.
 
+[Unreleased]: https://github.com/neolao/partition/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/neolao/partition/releases/tag/v0.2.0

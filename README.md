@@ -5,6 +5,7 @@ Site statique pour écrire une partition de musique dans le navigateur, génére
 <!-- vibe:begin:features -->
 
 - Une portée s'affiche à l'ouverture et s'adapte à la largeur de la fenêtre.
+- On règle la clé (sol, fa, ut), l'armure et le chiffrage de mesure ; les notes se répartissent en mesures, et une mesure incomplète ou trop remplie est signalée.
 - On choisit une durée (ronde à double croche), puis un clic sur la portée pose une note ou un silence.
 - Les flèches haut et bas changent la hauteur de la note sélectionnée ; Suppr supprime l'élément sélectionné.
 - Le bouton « Exporter MusicXML » télécharge la partition au format MusicXML, lisible par d'autres logiciels de notation.
@@ -38,7 +39,7 @@ npm run lint     # vérifie et corrige le style
 
 <!-- vibe:begin:docs-index -->
 
-Pas de documentation supplémentaire pour l'instant.
+- [Architecture](docs/architecture.md) — comment le code est organisé et comment une partition circule entre l'écran, les fichiers et le PDF.
 
 <!-- vibe:end:docs-index -->
 
