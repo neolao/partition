@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createEditor } from "../src/editor";
 import { toMusicXml } from "../src/musicxml";
+import { DEFAULT_SETTINGS } from "../src/score";
 
 vi.mock("../src/musicxml", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../src/musicxml")>();
@@ -258,12 +259,18 @@ describe("createEditor : hauteur au clavier", () => {
 		expect(announcement()).toBe(before);
 	});
 
-	it("ne dépasse pas do6", () => {
+	it("ne dépasse pas do7, borne haute de l'étendue", () => {
 		clickAt(100, Y_DO6);
+		for (let i = 0; i < 7; i++) {
+			press("ArrowUp");
+		}
+		// do6 + 7 degrés = do7, dessiné 7 × 5 px au-dessus de do6 (y = 40 - 35)
+		expect(announcement()).toBe("Note déplacée en do7");
+		expect(headYs()).toEqual([5]);
 		const event = press("ArrowUp");
 		expect(event.defaultPrevented).toBe(true);
-		expect(headYs()).toEqual([Y_DO6]);
-		expect(announcement()).toBe("Note do6 noire ajoutée");
+		expect(headYs()).toEqual([5]);
+		expect(announcement()).toBe("Note déplacée en do7");
 	});
 });
 
@@ -474,5 +481,244 @@ describe("createEditor : import MusicXML", () => {
 	it("permet de réimporter le même fichier", async () => {
 		await importText(VALID);
 		expect(input().value).toBe("");
+	});
+});
+
+describe("createEditor : réglages", () => {
+	const select = (name: string) =>
+		root.querySelector<HTMLSelectElement>(
+			`select[data-setting="${name}"]`,
+		) as HTMLSelectElement;
+
+	function change(name: string, value: string) {
+		const element = select(name);
+		element.focus();
+		element.value = value;
+		element.dispatchEvent(new Event("change", { bubbles: true }));
+	}
+
+	function addAt(x: number, y: number, count: number) {
+		for (let i = 0; i < count; i++) {
+			clickAt(x, y);
+		}
+	}
+
+	it("présente trois listes avec un libellé visible et les valeurs par défaut", () => {
+		const labels = ["clef", "fifths", "time"].map((name) => {
+			const element = select(name);
+			expect(element.labels).toHaveLength(1);
+			return [
+				element.labels?.[0].textContent?.trim().split("\n")[0],
+				element.value,
+			];
+		});
+		expect(labels.map(([label]) => label?.slice(0, 3))).toEqual([
+			"Clé",
+			"Arm",
+			"Chi",
+		]);
+		expect(select("clef").value).toBe("treble");
+		expect(select("fifths").value).toBe("0");
+		expect(select("time").value).toBe("4/4");
+	});
+
+	it("propose les clés, 15 armures ordonnées et les chiffrages", () => {
+		const texts = (name: string) =>
+			[...select(name).options].map((o) => o.textContent);
+		expect(texts("clef")).toEqual(["Sol", "Fa", "Ut"]);
+		const fifths = texts("fifths");
+		expect(fifths).toHaveLength(15);
+		expect(fifths[0]).toBe("7 bémols");
+		expect(fifths[7]).toBe("Do majeur");
+		expect(fifths[14]).toBe("7 dièses");
+		expect(texts("time")).toEqual([
+			"2/4",
+			"3/4",
+			"4/4",
+			"2/2",
+			"3/8",
+			"6/8",
+			"9/8",
+			"12/8",
+		]);
+	});
+
+	it("place les listes après les boutons et avant l'export", () => {
+		const children = [
+			...(root.querySelector('[role="toolbar"]')?.children ?? []),
+		];
+		const indexOfSelect = children.findIndex((c) => c.querySelector("select"));
+		const indexOfExport = children.findIndex(
+			(c) => (c as HTMLElement).dataset.action === "export-musicxml",
+		);
+		const indexOfLastDuration = children.reduce(
+			(last, c, i) => ((c as HTMLElement).dataset.duration ? i : last),
+			-1,
+		);
+		expect(indexOfSelect).toBeGreaterThan(indexOfLastDuration);
+		expect(indexOfSelect).toBeLessThan(indexOfExport);
+	});
+
+	it("redessine avec le nouveau chiffrage et annonce le nombre de mesures", () => {
+		choose('[data-duration="8"]');
+		addAt(5000, Y_SOL4, 7);
+		expect(staff.querySelectorAll(".vf-stave")).toHaveLength(1);
+		change("time", "6/8");
+		expect(staff.querySelectorAll(".vf-stave")).toHaveLength(2);
+		expect(announcement()).toBe("Chiffrage 6/8 : 2 mesures");
+		expect(noteGroups()).toHaveLength(7);
+		expect(document.activeElement).toBe(select("time"));
+	});
+
+	it("annonce « 1 mesure » au singulier", () => {
+		change("fifths", "-3");
+		expect(announcement()).toBe("Armure 3 bémols : 1 mesure");
+	});
+
+	it("annonce le changement de clé", () => {
+		change("clef", "bass");
+		expect(announcement()).toBe("Clé Fa : 1 mesure");
+	});
+
+	it("garde les notes quand la clé change", () => {
+		addAt(5000, Y_SOL4, 2);
+		change("clef", "alto");
+		expect(noteGroups()).toHaveLength(2);
+		expect(announcement()).toBe("Clé Ut : 1 mesure");
+	});
+
+	it("lit la hauteur cliquée selon la clé de fa : ligne du haut = la3", () => {
+		change("clef", "bass");
+		clickAt(100, 60);
+		expect(announcement()).toMatch(/^Note la3 noire ajoutée/);
+	});
+
+	it("lit la hauteur cliquée selon la clé d'ut : ligne du haut = sol4", () => {
+		change("clef", "alto");
+		clickAt(100, 60);
+		expect(announcement()).toMatch(/^Note sol4 noire ajoutée/);
+	});
+
+	it("sélectionne une note existante avec la hauteur de la clé courante", () => {
+		change("clef", "bass");
+		clickAt(100, 60);
+		const head = staff.querySelector(".vf-notehead text");
+		clickAt(Number(head?.getAttribute("x")) + 3, 60);
+		expect(noteGroups()).toHaveLength(1);
+	});
+
+	it("ignore une valeur invalide sans rien changer", () => {
+		const option = document.createElement("option");
+		option.value = "99";
+		select("fifths").append(option);
+		change("fifths", "99");
+		expect(announcement()).toBe("Réglage invalide");
+		expect(select("fifths").value).toBe("0");
+	});
+
+	it("exporte avec les réglages choisis", () => {
+		vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:test");
+		vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+		vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+		change("clef", "bass");
+		change("fifths", "2");
+		change("time", "6/8");
+		choose('[data-action="export-musicxml"]');
+		expect(toMusicXml).toHaveBeenLastCalledWith([], {
+			clef: "bass",
+			fifths: 2,
+			time: { beats: 6, beatType: 8 },
+		});
+	});
+
+	it("exporte avec les réglages par défaut au départ", () => {
+		vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:test");
+		vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+		vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+		choose('[data-action="export-musicxml"]');
+		expect(toMusicXml).toHaveBeenLastCalledWith([], DEFAULT_SETTINGS);
+	});
+});
+
+describe("createEditor : état de la mesure", () => {
+	it("signale une mesure complète après quatre noires en 4/4", () => {
+		for (let i = 0; i < 3; i++) {
+			clickAt(5000, Y_SOL4);
+			expect(announcement()).toBe("Note sol4 noire ajoutée");
+		}
+		clickAt(5000, Y_SOL4);
+		expect(announcement()).toBe("Note sol4 noire ajoutée. Mesure 1 complète");
+	});
+
+	it("signale une mesure trop remplie et numérote la mesure concernée", () => {
+		for (let i = 0; i < 4; i++) {
+			clickAt(5000, Y_SOL4);
+		}
+		for (let i = 0; i < 3; i++) {
+			clickAt(5000, Y_SOL4);
+		}
+		choose('[data-duration="h"]');
+		clickAt(5000, Y_SOL4);
+		expect(announcement()).toBe(
+			"Note sol4 blanche ajoutée. Mesure 2 trop remplie",
+		);
+	});
+
+	it("complète aussi l'annonce d'un silence", () => {
+		choose('[data-mode="rest"]');
+		choose('[data-duration="w"]');
+		clickAt(5000, Y_SOL4);
+		expect(announcement()).toBe("Silence ronde ajouté. Mesure 1 complète");
+	});
+});
+
+describe("createEditor : défilement vers la sélection", () => {
+	it("fait défiler pour garder le centre de l'élément visible", () => {
+		let left = 0;
+		Object.defineProperty(staff, "clientWidth", {
+			value: 30,
+			configurable: true,
+		});
+		Object.defineProperty(staff, "scrollLeft", {
+			get: () => left,
+			set: (value: number) => {
+				left = value;
+			},
+			configurable: true,
+		});
+		clickAt(5000, Y_SOL4);
+		const mark = staff.querySelector("rect.selection-mark");
+		const center =
+			Number(mark?.getAttribute("x")) + Number(mark?.getAttribute("width")) / 2;
+		expect(center).toBeGreaterThan(30);
+		expect(left).toBe(center + 20 - 30);
+	});
+});
+
+describe("createEditor : import des réglages", () => {
+	const input = () =>
+		root.querySelector<HTMLInputElement>(
+			'input[type="file"]',
+		) as HTMLInputElement;
+	const FILE = `<score-partwise version="4.0"><part-list/><part id="P1"><measure number="1"><attributes><divisions>4</divisions><key><fifths>-3</fifths></key><time><beats>3</beats><beat-type>4</beat-type></time><clef><sign>F</sign><line>4</line></clef></attributes>
+		<note><pitch><step>A</step><octave>3</octave></pitch><duration>4</duration><type>quarter</type></note></measure></part></score-partwise>`;
+
+	it("applique la clé, l'armure et le chiffrage du fichier aux listes", async () => {
+		Object.defineProperty(input(), "files", {
+			value: [new File([FILE], "p.musicxml")],
+			configurable: true,
+		});
+		input().dispatchEvent(new Event("change"));
+		await vi.waitFor(() => expect(announcement()).toBe("Partition importée"));
+		const value = (name: string) =>
+			(
+				root.querySelector(
+					`select[data-setting="${name}"]`,
+				) as HTMLSelectElement
+			).value;
+		expect(value("clef")).toBe("bass");
+		expect(value("fifths")).toBe("-3");
+		expect(value("time")).toBe("3/4");
+		expect(headYs()).toEqual([60]);
 	});
 });

@@ -1,15 +1,24 @@
 import { fromMusicXml, toMusicXml } from "./musicxml";
 import {
+	assertSettings,
+	CLEF_NAMES,
+	CLEFS,
+	type Clef,
+	DEFAULT_SETTINGS,
 	DURATION_NAMES,
 	DURATIONS,
 	type Duration,
 	deleteElement,
 	insertElement,
 	insertionIndex,
+	keySignatureName,
 	movePitch,
 	pitchFromY,
 	pitchName,
 	type Score,
+	type Settings,
+	TIME_SIGNATURES,
+	timeName,
 	yForPitch,
 } from "./score";
 import { renderStaff, type StaffGeometry } from "./staff";
@@ -22,6 +31,12 @@ const HIT_Y = 8;
 // Un silence se dessine au milieu de la portée : on accepte tout clic à moins de 2 interlignes.
 const REST_HIT_LINES = 2;
 
+// Marge, en pixels, gardée visible autour de l'élément sélectionné lors du défilement.
+const SCROLL_MARGIN = 20;
+const FIFTHS_RANGE = Array.from({ length: 15 }, (_, i) => i - 7);
+
+type SettingName = "clef" | "fifths" | "time";
+
 const capitalize = (text: string) =>
 	text.charAt(0).toUpperCase() + text.slice(1);
 
@@ -33,13 +48,42 @@ function createButton(label: string, data: Record<string, string>) {
 	return button;
 }
 
+function createSetting(
+	label: string,
+	name: SettingName,
+	options: { value: string; text: string }[],
+) {
+	const wrapper = document.createElement("label");
+	wrapper.className = "setting";
+	const text = document.createElement("span");
+	text.textContent = label;
+	const select = document.createElement("select");
+	select.dataset.setting = name;
+	select.append(
+		...options.map(({ value, text: optionText }) => {
+			const option = document.createElement("option");
+			option.value = value;
+			option.textContent = optionText;
+			return option;
+		}),
+	);
+	wrapper.append(text, select);
+	return { wrapper, select };
+}
+
 /** Monte l'éditeur (palette, portée, aide, annonces) dans le conteneur. */
 export function createEditor(root: HTMLElement): { redraw: () => void } {
 	let score: Score = [];
 	let selected: number | null = null;
 	let duration: Duration = "q";
 	let mode: Mode = "note";
-	let geometry: StaffGeometry = { topLineY: 0, lineSpacing: 10, centers: [] };
+	let geometry: StaffGeometry = {
+		topLineY: 0,
+		lineSpacing: 10,
+		centers: [],
+		measures: [],
+	};
+	let settings: Settings = DEFAULT_SETTINGS;
 
 	const toolbar = document.createElement("div");
 	toolbar.setAttribute("role", "toolbar");
@@ -51,6 +95,27 @@ export function createEditor(root: HTMLElement): { redraw: () => void } {
 		createButton("Note", { mode: "note" }),
 		createButton("Silence", { mode: "rest" }),
 	];
+	const clefSetting = createSetting(
+		"Clé",
+		"clef",
+		CLEFS.map((value) => ({ value, text: capitalize(CLEF_NAMES[value]) })),
+	);
+	const fifthsSetting = createSetting(
+		"Armure",
+		"fifths",
+		FIFTHS_RANGE.map((value) => ({
+			value: String(value),
+			text: keySignatureName(value),
+		})),
+	);
+	const timeSetting = createSetting(
+		"Chiffrage",
+		"time",
+		TIME_SIGNATURES.map((value) => ({
+			value: timeName(value),
+			text: timeName(value),
+		})),
+	);
 	const exportButton = createButton("Exporter MusicXML", {
 		action: "export-musicxml",
 	});
@@ -64,6 +129,9 @@ export function createEditor(root: HTMLElement): { redraw: () => void } {
 	toolbar.append(
 		...modeButtons,
 		...durationButtons,
+		clefSetting.wrapper,
+		fifthsSetting.wrapper,
+		timeSetting.wrapper,
 		exportButton,
 		importButton,
 		fileInput,
@@ -114,16 +182,85 @@ export function createEditor(root: HTMLElement): { redraw: () => void } {
 		}
 	}
 
-	function redraw() {
-		geometry = renderStaff(staff, staff.clientWidth, score, selected);
-		hint.hidden = score.length > 0;
+	function syncSettings() {
+		clefSetting.select.value = settings.clef;
+		fifthsSetting.select.value = String(settings.fifths);
+		timeSetting.select.value = timeName(settings.time);
 	}
 
-	function update(next: Score, nextSelected: number | null, message: string) {
+	function scrollToSelection() {
+		// Sans mise en page (largeur nulle), il n'y a rien à faire défiler.
+		if (selected === null || staff.clientWidth <= 0) {
+			return;
+		}
+		const center = geometry.centers[selected];
+		if (center - SCROLL_MARGIN < staff.scrollLeft) {
+			staff.scrollLeft = center - SCROLL_MARGIN;
+		} else if (center + SCROLL_MARGIN > staff.scrollLeft + staff.clientWidth) {
+			staff.scrollLeft = center + SCROLL_MARGIN - staff.clientWidth;
+		}
+	}
+
+	function redraw() {
+		geometry = renderStaff(staff, staff.clientWidth, score, selected, settings);
+		hint.hidden = score.length > 0;
+		scrollToSelection();
+	}
+
+	function measureSuffix(index: number) {
+		const measure = geometry.measures.find(
+			({ start, end }) => index >= start && index < end,
+		);
+		if (measure?.status === "complete") {
+			return `. Mesure ${geometry.measures.indexOf(measure) + 1} complète`;
+		}
+		if (measure?.status === "overfull") {
+			return `. Mesure ${geometry.measures.indexOf(measure) + 1} trop remplie`;
+		}
+		return "";
+	}
+
+	function applySetting(name: SettingName, value: string) {
+		const next: Settings = { ...settings };
+		if (name === "clef") {
+			next.clef = value as Clef;
+		} else if (name === "fifths") {
+			next.fifths = Number(value);
+		} else {
+			next.time =
+				TIME_SIGNATURES.find((t) => timeName(t) === value) ?? next.time;
+		}
+		try {
+			assertSettings(next);
+		} catch {
+			syncSettings();
+			live.textContent = "Réglage invalide";
+			return;
+		}
+		const label = {
+			clef: `Clé ${capitalize(CLEF_NAMES[next.clef])}`,
+			fifths: `Armure ${keySignatureName(next.fifths)}`,
+			time: `Chiffrage ${timeName(next.time)}`,
+		}[name];
+		settings = next;
+		redraw();
+		const count = geometry.measures.length;
+		live.textContent = `${label} : ${count} mesure${count > 1 ? "s" : ""}`;
+	}
+
+	function update(
+		next: Score,
+		nextSelected: number | null,
+		message: string,
+		withMeasureState = false,
+	) {
 		score = next;
 		selected = nextSelected;
-		live.textContent = message;
 		redraw();
+		live.textContent =
+			withMeasureState && nextSelected !== null
+				? message + measureSuffix(nextSelected)
+				: message;
 	}
 
 	function hit(x: number, y: number): number | null {
@@ -137,14 +274,21 @@ export function createEditor(root: HTMLElement): { redraw: () => void } {
 				return Math.abs(y - middle) <= REST_HIT_LINES * lineSpacing;
 			}
 			return (
-				Math.abs(y - yForPitch(element.pitch, topLineY, lineSpacing)) <= HIT_Y
+				Math.abs(
+					y - yForPitch(element.pitch, topLineY, lineSpacing, settings.clef),
+				) <= HIT_Y
 			);
 		});
 		return index === -1 ? null : index;
 	}
 
 	function place(x: number, y: number) {
-		const pitch = pitchFromY(y, geometry.topLineY, geometry.lineSpacing);
+		const pitch = pitchFromY(
+			y,
+			geometry.topLineY,
+			geometry.lineSpacing,
+			settings.clef,
+		);
 		if (pitch === null) {
 			return;
 		}
@@ -155,12 +299,14 @@ export function createEditor(root: HTMLElement): { redraw: () => void } {
 				insertElement(score, { kind: "rest", duration }, index),
 				index,
 				`Silence ${durationName} ajouté`,
+				true,
 			);
 		} else {
 			update(
 				insertElement(score, { kind: "note", pitch, duration }, index),
 				index,
 				`Note ${pitchName(pitch)} ${durationName} ajoutée`,
+				true,
 			);
 		}
 	}
@@ -185,7 +331,7 @@ export function createEditor(root: HTMLElement): { redraw: () => void } {
 		let url: string | null = null;
 		let link: HTMLAnchorElement | null = null;
 		try {
-			const blob = new Blob([toMusicXml(score)], {
+			const blob = new Blob([toMusicXml(score, settings)], {
 				type: "application/vnd.recordare.musicxml+xml",
 			});
 			url = URL.createObjectURL(blob);
@@ -209,7 +355,13 @@ export function createEditor(root: HTMLElement): { redraw: () => void } {
 
 	async function importMusicXml(file: File) {
 		try {
-			const { score: imported, warnings } = fromMusicXml(await file.text());
+			const {
+				score: imported,
+				settings: importedSettings,
+				warnings,
+			} = fromMusicXml(await file.text());
+			settings = importedSettings;
+			syncSettings();
 			update(imported, null, "Partition importée");
 			showNotice(
 				"status",
@@ -254,6 +406,14 @@ export function createEditor(root: HTMLElement): { redraw: () => void } {
 		refreshToolbar();
 	});
 
+	toolbar.addEventListener("change", (event) => {
+		const target = event.target as HTMLSelectElement;
+		const name = target.dataset.setting as SettingName | undefined;
+		if (name) {
+			applySetting(name, target.value);
+		}
+	});
+
 	staff.addEventListener("click", (event) => {
 		const rect = staff.getBoundingClientRect();
 		const x = event.clientX - rect.left + staff.scrollLeft;
@@ -291,6 +451,7 @@ export function createEditor(root: HTMLElement): { redraw: () => void } {
 	});
 
 	refreshToolbar();
+	syncSettings();
 	redraw();
 	return { redraw };
 }

@@ -44,11 +44,178 @@ function fromDiatonic(index: number): Pitch {
 	return { step: STEPS[index % 7], octave: Math.floor(index / 7) };
 }
 
-// Étendue utilisable en clé de sol : la3 à do6.
-const LOWEST = toDiatonic({ step: "a", octave: 3 });
-const HIGHEST = toDiatonic({ step: "c", octave: 6 });
-// Ligne du haut de la portée en clé de sol : fa5.
-const TOP_LINE = toDiatonic({ step: "f", octave: 5 });
+// Étendue absolue acceptée, indépendante de la clé : do2 à do7.
+const LOWEST = toDiatonic({ step: "c", octave: 2 });
+const HIGHEST = toDiatonic({ step: "c", octave: 7 });
+
+export const CLEFS = ["treble", "bass", "alto"] as const;
+export type Clef = (typeof CLEFS)[number];
+
+export const CLEF_NAMES: Record<Clef, string> = {
+	treble: "sol",
+	bass: "fa",
+	alto: "ut",
+};
+
+// Hauteur de la ligne du haut de la portée : fa5, la3, sol4.
+const TOP_LINES: Record<Clef, number> = {
+	treble: toDiatonic({ step: "f", octave: 5 }),
+	bass: toDiatonic({ step: "a", octave: 3 }),
+	alto: toDiatonic({ step: "g", octave: 4 }),
+};
+// Fenêtre cliquable, en degrés autour de la ligne du haut.
+const DEGREES_BELOW_TOP = 12;
+const DEGREES_ABOVE_TOP = 4;
+
+export interface TimeSignature {
+	beats: number;
+	beatType: number;
+}
+
+export const TIME_SIGNATURES: readonly TimeSignature[] = [
+	{ beats: 2, beatType: 4 },
+	{ beats: 3, beatType: 4 },
+	{ beats: 4, beatType: 4 },
+	{ beats: 2, beatType: 2 },
+	{ beats: 3, beatType: 8 },
+	{ beats: 6, beatType: 8 },
+	{ beats: 9, beatType: 8 },
+	{ beats: 12, beatType: 8 },
+];
+
+export interface Settings {
+	clef: Clef;
+	/** Nombre d'altérations à l'armure : > 0 dièses, < 0 bémols (-7 à 7). */
+	fifths: number;
+	time: TimeSignature;
+}
+
+export const DEFAULT_SETTINGS: Settings = {
+	clef: "treble",
+	fifths: 0,
+	time: { beats: 4, beatType: 4 },
+};
+
+function assertFifths(fifths: number): void {
+	if (!Number.isInteger(fifths) || fifths < -7 || fifths > 7) {
+		throw new RangeError(`Armure invalide : ${fifths}`);
+	}
+}
+
+/** Nom français d'une armure, par exemple « 2 dièses ». */
+export function keySignatureName(fifths: number): string {
+	assertFifths(fifths);
+	if (fifths === 0) {
+		return "Do majeur";
+	}
+	const count = Math.abs(fifths);
+	const noun = fifths > 0 ? "dièse" : "bémol";
+	return `${count} ${noun}${count > 1 ? "s" : ""}`;
+}
+
+/** Chiffrage affiché, par exemple « 6/8 ». */
+export function timeName(time: TimeSignature): string {
+	return `${time.beats}/${time.beatType}`;
+}
+
+export function assertSettings(settings: Settings): void {
+	if (!CLEFS.includes(settings.clef)) {
+		throw new RangeError(`Clé inconnue : ${settings.clef}`);
+	}
+	assertFifths(settings.fifths);
+	const { beats, beatType } = settings.time;
+	if (
+		!TIME_SIGNATURES.some((t) => t.beats === beats && t.beatType === beatType)
+	) {
+		throw new RangeError(`Chiffrage invalide : ${beats}/${beatType}`);
+	}
+}
+
+const DURATION_TICKS: Record<Duration, number> = {
+	w: 16,
+	h: 8,
+	q: 4,
+	"8": 2,
+	"16": 1,
+};
+
+/** Durée en doubles croches. */
+export function durationTicks(duration: Duration): number {
+	return DURATION_TICKS[duration];
+}
+
+/** Capacité d'une mesure en doubles croches. */
+export function measureCapacity(time: TimeSignature): number {
+	return (time.beats * 16) / time.beatType;
+}
+
+function gcd(a: number, b: number): number {
+	return b === 0 ? a : gcd(b, a % b);
+}
+
+/** Durée saisie en fraction de ronde réduite, par exemple « 3/16 » (0 pour rien, « 1 » pour une ronde). */
+export function fillName(ticks: number): string {
+	if (!Number.isInteger(ticks) || ticks < 0) {
+		throw new RangeError(`Durée invalide : ${ticks}`);
+	}
+	if (ticks === 0) {
+		return "0";
+	}
+	const divisor = gcd(ticks, 16);
+	const denominator = 16 / divisor;
+	return denominator === 1
+		? String(ticks / divisor)
+		: `${ticks / divisor}/${denominator}`;
+}
+
+export type MeasureStatus = "empty" | "incomplete" | "complete" | "overfull";
+
+export interface Measure {
+	/** Index du premier élément. */
+	start: number;
+	/** Index suivant le dernier élément (exclu). */
+	end: number;
+	ticks: number;
+	capacity: number;
+	status: MeasureStatus;
+}
+
+function measureOf(
+	start: number,
+	end: number,
+	ticks: number,
+	capacity: number,
+): Measure {
+	let status: MeasureStatus = "incomplete";
+	if (ticks === 0) {
+		status = "empty";
+	} else if (ticks === capacity) {
+		status = "complete";
+	} else if (ticks > capacity) {
+		status = "overfull";
+	}
+	return { start, end, ticks, capacity, status };
+}
+
+/** Répartit les éléments en mesures : une mesure reçoit des éléments tant qu'elle n'est pas pleine. */
+export function splitMeasures(score: Score, time: TimeSignature): Measure[] {
+	const capacity = measureCapacity(time);
+	const measures: Measure[] = [];
+	let start = 0;
+	let ticks = 0;
+	score.forEach((element, i) => {
+		ticks += durationTicks(element.duration);
+		if (ticks >= capacity) {
+			measures.push(measureOf(start, i + 1, ticks, capacity));
+			start = i + 1;
+			ticks = 0;
+		}
+	});
+	if (start < score.length || measures.length === 0) {
+		measures.push(measureOf(start, score.length, ticks, capacity));
+	}
+	return measures;
+}
 
 function assertIndex(index: number, max: number): void {
 	if (!Number.isInteger(index) || index < 0 || index > max) {
@@ -82,21 +249,27 @@ export function yForPitch(
 	pitch: Pitch,
 	topLineY: number,
 	spacing: number,
+	clef: Clef = "treble",
 ): number {
-	return topLineY + (TOP_LINE - toDiatonic(pitch)) * (spacing / 2);
+	return topLineY + (TOP_LINES[clef] - toDiatonic(pitch)) * (spacing / 2);
 }
 
-/** Hauteur la plus proche de l'ordonnée donnée, ou null hors de l'étendue utilisable. */
+/** Hauteur la plus proche de l'ordonnée donnée, ou null hors de la fenêtre cliquable de la clé. */
 export function pitchFromY(
 	y: number,
 	topLineY: number,
 	spacing: number,
+	clef: Clef = "treble",
 ): Pitch | null {
 	if (!Number.isFinite(y)) {
 		throw new RangeError(`Ordonnée invalide : ${y}`);
 	}
-	const position = Math.round(TOP_LINE - (y - topLineY) / (spacing / 2));
-	if (position < LOWEST || position > HIGHEST) {
+	const top = TOP_LINES[clef];
+	const position = Math.round(top - (y - topLineY) / (spacing / 2));
+	if (
+		position < top - DEGREES_BELOW_TOP ||
+		position > top + DEGREES_ABOVE_TOP
+	) {
 		return null;
 	}
 	return fromDiatonic(position);
