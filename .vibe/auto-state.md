@@ -3,7 +3,7 @@ status: running
 started: 2026-10-23T23:30
 limit: none
 push: false
-current: 005
+current: 008
 attempt: 1
 ---
 # Auto run journal
@@ -17,4 +17,5 @@ attempt: 1
 - 006 — feature — done (f556c8b)
 - 007 — feature — done (a82897c)
 - 004 — feature — done (e7d5130, repris après limite d'usage)
-- 005 — feature — in progress
+- 005 — feature — done (d1991ff)
+- 008 — feature — in progress
