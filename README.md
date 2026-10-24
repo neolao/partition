@@ -8,6 +8,7 @@ Site statique pour écrire une partition de musique dans le navigateur, génére
 - On choisit une durée (ronde à double croche), puis un clic sur la portée pose une note ou un silence.
 - Les flèches haut et bas changent la hauteur de la note sélectionnée ; Suppr supprime l'élément sélectionné.
 - Le bouton « Exporter MusicXML » télécharge la partition au format MusicXML, lisible par d'autres logiciels de notation.
+- Le bouton « Exporter PDF » télécharge la partition en PDF A4 prêt à imprimer : les mesures ne sont jamais coupées entre deux lignes ou deux pages, et une partition vide affiche un message au lieu d'un PDF vide.
 - Le bouton « Importer MusicXML » ouvre un fichier MusicXML pour l'afficher et le modifier ; un fichier invalide donne une erreur claire et les éléments non pris en charge sont signalés.
 
 <!-- vibe:end:features -->

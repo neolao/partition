@@ -151,13 +151,25 @@ describe("buildPdf", () => {
 		expect(pageCount(text)).toBe(1);
 	});
 
-	it("embarque la police des notes et donne une taille non nulle aux glyphes", async () => {
+	// Tailles des opérateurs « /F<n> <taille> Tf » qui utilisent la police dont le /BaseFont est `family`.
+	// (jsPDF écrit un /BaseFont pour toute police enregistrée, même inutilisée : seul un Tf prouve l'usage.)
+	const sizesDrawnWith = (pdfText: string, family: string): number[] => {
+		const resources = [...pdfText.matchAll(/\/F(\d+) (\d+) 0 R/g)];
+		const ids = resources
+			.filter(([, , object]) =>
+				new RegExp(
+					`\\n${object} 0 obj[\\s\\S]*?/BaseFont /${family}\\s[\\s\\S]*?endobj`,
+				).test(pdfText),
+			)
+			.map(([, id]) => id);
+		return [...pdfText.matchAll(/\/F(\d+)\s+([\d.]+)\s+Tf/g)]
+			.filter(([, id]) => ids.includes(id))
+			.map(([, , size]) => Number(size));
+	};
+
+	it("dessine les glyphes avec la police Bravura embarquée, en taille non nulle", async () => {
 		const text = await (await buildPdf([note("q")], DEFAULT_SETTINGS)).text();
-		expect(text).toContain("Bravura");
-		// Taille de police (opérateur Tf) toujours strictement positive.
-		const sizes = [...text.matchAll(/\/F\d+\s+([\d.]+)\s+Tf/g)].map((m) =>
-			Number(m[1]),
-		);
+		const sizes = sizesDrawnWith(text, GLYPH_FONT_FAMILY);
 		expect(sizes.length).toBeGreaterThan(0);
 		expect(sizes.every((size) => size > 0)).toBe(true);
 	});
@@ -182,18 +194,14 @@ describe("buildPdf", () => {
 		expect(sizes.some((size) => size?.endsWith("pt"))).toBe(false);
 	});
 
-	it("enregistre dans le PDF la famille que VexFlow écrit dans le SVG", async () => {
-		const container = document.createElement("div");
-		renderStaff(container, 700, [note("q")], null, DEFAULT_SETTINGS);
-		const families = container
-			.querySelector("svg")
-			?.getAttribute("font-family")
+	it("fournit à svg2pdf un SVG dont la famille est celle de la police enregistrée dans le PDF", async () => {
+		await buildPdf([note("q")], DEFAULT_SETTINGS);
+		const [[element]] = vi.mocked(svg2pdf).mock.calls;
+		const families = (element as Element)
+			.getAttribute("font-family")
 			?.split(",")
 			.map((family) => family.trim());
 		expect(families?.[0]).toBe(GLYPH_FONT_FAMILY);
-
-		const text = await (await buildPdf([note("q")], DEFAULT_SETTINGS)).text();
-		expect(text).toContain(GLYPH_FONT_FAMILY);
 	});
 
 	it("produit plusieurs pages pour une partition longue", async () => {

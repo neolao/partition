@@ -33,3 +33,8 @@ _Sources: `src/score.ts`_
 ## Réglages
 Clé, armure et chiffrage de la partition.
 _Sources: `src/score.ts`_
+
+## Export PDF
+Téléchargement de la partition sous forme de fichier PDF A4 (`partition.pdf`) : les mesures sont réparties en lignes puis en pages sans jamais être coupées ; une partition vide n'est pas exportée.
+**Do not confuse with:** Export MusicXML
+_Sources: `src/pdf.ts`, `src/editor.ts`_

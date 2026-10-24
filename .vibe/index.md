@@ -5,6 +5,7 @@
 ## Modules
 
 - [`modules/app.md`](modules/app.md) — point d'entrée du site statique.
+- [`modules/pdf.md`](modules/pdf.md) — génération du PDF A4 vectoriel.
 - [`modules/editor.md`](modules/editor.md) — éditeur interactif (palette, clics, clavier).
 - [`modules/musicxml.md`](modules/musicxml.md) — export MusicXML de la partition.
 - [`modules/score.md`](modules/score.md) — modèle de partition pur.
