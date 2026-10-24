@@ -2,12 +2,19 @@
 import { svg2pdf } from "svg2pdf.js";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import fontDataUri from "../src/fonts/bravura-subset.ttf?inline";
-import { buildPdf, paginateLines, splitIntoLines } from "../src/pdf";
+import {
+	buildPdf,
+	GLYPH_FONT_FAMILY,
+	paginateLines,
+	splitIntoLines,
+} from "../src/pdf";
 import {
 	CLEFS,
+	type Clef,
 	DEFAULT_SETTINGS,
 	DURATIONS,
 	type Duration,
+	type Pitch,
 	type Score,
 	type ScoreElement,
 	type Settings,
@@ -17,9 +24,18 @@ import {
 import { renderStaff } from "../src/staff";
 import { readCmapCodePoints } from "./helpers/cmap";
 
+// Numéro de page courant du PDF au moment de chaque appel à svg2pdf.
+const pagesAtDraw = vi.hoisted(() => [] as number[]);
+
 vi.mock("svg2pdf.js", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("svg2pdf.js")>();
-	return { ...actual, svg2pdf: vi.fn(actual.svg2pdf) };
+	return {
+		...actual,
+		svg2pdf: vi.fn((element, pdf, options) => {
+			pagesAtDraw.push(pdf.getCurrentPageInfo().pageNumber);
+			return actual.svg2pdf(element, pdf, options);
+		}),
+	};
 });
 
 const note = (duration: Duration): ScoreElement => ({
@@ -118,6 +134,7 @@ describe("buildPdf", () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks();
+		pagesAtDraw.length = 0;
 	});
 
 	const pageCount = (text: string) =>
@@ -143,6 +160,40 @@ describe("buildPdf", () => {
 		);
 		expect(sizes.length).toBeGreaterThan(0);
 		expect(sizes.every((size) => size > 0)).toBe(true);
+	});
+
+	it("convertit en pixels les tailles en points des glyphes avant svg2pdf (30 pt vaut 40 px)", async () => {
+		const raw = document.createElement("div");
+		renderStaff(raw, 700, [note("q")], null, DEFAULT_SETTINGS);
+		const rawSizes = [...raw.querySelectorAll("text[font-size]")].map((t) =>
+			t.getAttribute("font-size"),
+		);
+		// Hypothèse de départ : VexFlow écrit les glyphes en 30pt.
+		expect(rawSizes).toContain("30pt");
+
+		await buildPdf([note("q")], DEFAULT_SETTINGS);
+		const [[element]] = vi.mocked(svg2pdf).mock.calls;
+		const sizes = [
+			...(element as Element).querySelectorAll("text[font-size]"),
+		].map((t) => t.getAttribute("font-size"));
+		expect(sizes.filter((size) => size === "40")).toHaveLength(
+			rawSizes.filter((size) => size === "30pt").length,
+		);
+		expect(sizes.some((size) => size?.endsWith("pt"))).toBe(false);
+	});
+
+	it("enregistre dans le PDF la famille que VexFlow écrit dans le SVG", async () => {
+		const container = document.createElement("div");
+		renderStaff(container, 700, [note("q")], null, DEFAULT_SETTINGS);
+		const families = container
+			.querySelector("svg")
+			?.getAttribute("font-family")
+			?.split(",")
+			.map((family) => family.trim());
+		expect(families?.[0]).toBe(GLYPH_FONT_FAMILY);
+
+		const text = await (await buildPdf([note("q")], DEFAULT_SETTINGS)).text();
+		expect(text).toContain(GLYPH_FONT_FAMILY);
 	});
 
 	it("produit plusieurs pages pour une partition longue", async () => {
@@ -228,6 +279,19 @@ describe("buildPdf", () => {
 			expect(all.filter((p) => p.y > 40).length).toBeGreaterThan(0);
 		}, 20000);
 
+		it("dessine chaque ligne sur la page prévue par paginateLines", async () => {
+			await buildPdf(repeat("q", 160), DEFAULT_SETTINGS);
+			const all = placements();
+			const expected = paginateLines(all.length, {
+				pageHeight: 841.89,
+				margin: 40,
+				lineHeight: Math.max(...all.map((p) => p.height)),
+			});
+			expect(expected[expected.length - 1].page).toBeGreaterThan(0);
+			expect(pagesAtDraw).toEqual(expected.map((slot) => slot.page + 1));
+			expect(all.map((p) => p.y)).toEqual(expected.map((slot) => slot.y));
+		}, 20000);
+
 		it("réduit pour rester dans les marges une mesure seule plus large que la cible", async () => {
 			// Une seule mesure de seize doubles croches, plus large que les 700 px visés.
 			await buildPdf(repeat("16", 16), DEFAULT_SETTINGS);
@@ -267,6 +331,33 @@ describe("police embarquée", () => {
 		const glyphs = glyphsOf(elements, DEFAULT_SETTINGS);
 		expect(glyphs.length).toBeGreaterThan(0);
 		expect(missing(glyphs)).toEqual([]);
+	});
+
+	it("contient les fanions des croches et doubles croches, hampe en haut et en bas, pour chaque clé", () => {
+		// Une note sous et une note au-dessus de la ligne du milieu de la clé (hampe en haut / en bas).
+		const pitches: Record<Clef, { low: Pitch; high: Pitch }> = {
+			treble: {
+				low: { step: "g", octave: 4 },
+				high: { step: "b", octave: 5 },
+			},
+			bass: { low: { step: "b", octave: 2 }, high: { step: "d", octave: 4 } },
+			alto: { low: { step: "e", octave: 3 }, high: { step: "c", octave: 5 } },
+		};
+		for (const clef of CLEFS) {
+			const elements = (["8", "16"] as const).flatMap((duration) =>
+				[pitches[clef].low, pitches[clef].high].map(
+					(pitch) => ({ kind: "note", pitch, duration }) as const,
+				),
+			);
+			const glyphs = glyphsOf(elements, { ...DEFAULT_SETTINGS, clef });
+			// Les fanions des deux durées sont bien dessinés (hampe en haut : U+E240, U+E242).
+			expect(glyphs, clef).toEqual(expect.arrayContaining([0xe240, 0xe242]));
+			expect(missing(glyphs)).toEqual([]);
+		}
+	});
+
+	it("contient aussi les fanions hampe en bas (U+E241, U+E243), au cas où VexFlow les choisirait", () => {
+		expect(missing([0xe241, 0xe243])).toEqual([]);
 	});
 
 	it("contient les glyphes de chaque clé", () => {

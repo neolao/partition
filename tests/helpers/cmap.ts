@@ -23,10 +23,25 @@ export function readCmapCodePoints(data: Uint8Array): Set<number> {
 			const segCount = view.getUint16(start + 6) / 2;
 			const endCodes = start + 14;
 			const startCodes = endCodes + segCount * 2 + 2;
+			const idDeltas = startCodes + segCount * 2;
+			const idRangeOffsets = idDeltas + segCount * 2;
 			for (let s = 0; s < segCount; s++) {
+				const first = view.getUint16(startCodes + s * 2);
 				const last = view.getUint16(endCodes + s * 2);
-				for (let c = view.getUint16(startCodes + s * 2); c <= last; c++) {
-					if (c !== 0xffff) {
+				const delta = view.getUint16(idDeltas + s * 2);
+				const rangeOffset = view.getUint16(idRangeOffsets + s * 2);
+				for (let c = first; c <= last && c !== 0xffff; c++) {
+					let glyph: number;
+					if (rangeOffset === 0) {
+						glyph = (c + delta) & 0xffff;
+					} else {
+						const address =
+							idRangeOffsets + s * 2 + rangeOffset + (c - first) * 2;
+						const raw = view.getUint16(address);
+						glyph = raw === 0 ? 0 : (raw + delta) & 0xffff;
+					}
+					// L'index 0 est .notdef : le point de code n'a pas de vrai glyphe.
+					if (glyph !== 0) {
 						codePoints.add(c);
 					}
 				}
@@ -35,9 +50,13 @@ export function readCmapCodePoints(data: Uint8Array): Set<number> {
 			const groups = view.getUint32(start + 12);
 			for (let g = 0; g < groups; g++) {
 				const group = start + 16 + g * 12;
+				const first = view.getUint32(group);
 				const last = view.getUint32(group + 4);
-				for (let c = view.getUint32(group); c <= last; c++) {
-					codePoints.add(c);
+				const firstGlyph = view.getUint32(group + 8);
+				for (let c = first; c <= last; c++) {
+					if (firstGlyph + (c - first) !== 0) {
+						codePoints.add(c);
+					}
 				}
 			}
 		}

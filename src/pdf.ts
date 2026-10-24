@@ -12,6 +12,8 @@ const PAGE_HEIGHT = 841.89;
 const PAGE_MARGIN = 40;
 // Largeur, en pixels, visée pour une ligne de mesures avant mise à l'échelle sur la page.
 const TARGET_LINE_WIDTH = 700;
+/** Famille de la police des glyphes musicaux : celle que VexFlow écrit dans le SVG et que le PDF doit embarquer. */
+export const GLYPH_FONT_FAMILY = "Bravura";
 
 export interface PageLayout {
 	pageHeight: number;
@@ -134,7 +136,7 @@ export async function buildPdf(
 			"Bravura.ttf",
 			fontDataUri.slice(fontDataUri.indexOf(",") + 1),
 		);
-		pdf.addFont("Bravura.ttf", "Bravura", "normal");
+		pdf.addFont("Bravura.ttf", GLYPH_FONT_FAMILY, "normal");
 		for (const [i, drawing] of drawings.entries()) {
 			if (slots[i].page >= pdf.getNumberOfPages()) {
 				pdf.addPage();
